@@ -1,0 +1,5 @@
+# API Keys
+.api-key.txt
+
+# Python virtual environment
+venv/
