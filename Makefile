@@ -8,11 +8,22 @@ define success
 	tput sgr0;
 endef
 
-.PHONY: all clean html cleanblog aliases
+.PHONY: all clean html cleanblog aliases make readme
 
-all: venv
+readme:
+	@echo "Philby Coding Assistant" > README.txt
+	@echo "=======================" >> README.txt
+	@echo "" >> README.txt
+	@echo "A minimalist LLM agent tool system." >> README.txt
+	$(call success)
+
+all: venv readme
+	cat README.txt
+	$(call success)
+
+make: venv
 	. venv/bin/activate && \
-	LLM_GEMINI_KEY=$$(cat .api-key.txt) llm -m gemini-2.5-pro-exp-03-25 "$$(cat assistant-tool-loop-prompt.txt)" | python parse_llm_tool_call.py
+	LLM_GEMINI_KEY=$$(cat .api-key.txt) llm -m gemini-2.5-pro-exp-03-25 "$$(cat make-a-makefile.txt && echo '' && cat Makefile)" | python parse_llm_tool_call.py
 	$(call success)
 
 venv: requirements.txt
