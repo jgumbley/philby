@@ -39,6 +39,10 @@ clean-%:
 	@rm -f $*
 	$(call success)
 
+clean:
+	find . -name "*.txt" -type f -delete
+	$(call success)
+
 
 make: venv
 	. venv/bin/activate && \
