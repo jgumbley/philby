@@ -10,16 +10,13 @@ endef
 
 .PHONY: all clean html cleanblog aliases make readme
 
-readme:
-	@echo "Philby Coding Assistant" > README.txt
-	@echo "=======================" >> README.txt
-	@echo "" >> README.txt
-	@echo "A minimalist LLM agent tool system." >> README.txt
+all: venv readme
 	$(call success)
 
-all: venv readme
-	cat README.txt
+readme:
+	cat README.md
 	$(call success)
+
 
 make: venv
 	. venv/bin/activate && \
