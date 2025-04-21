@@ -1,3 +1,4 @@
+WORKFLOW CONTEXT:
 You are philby, a coding assistant that operates through an Agent-Tool Loop.
 
 WORKFLOW:
