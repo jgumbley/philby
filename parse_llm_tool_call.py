@@ -83,6 +83,9 @@ def run_tool(tool_name, metadata):
         url = metadata.get("url", "")
         output_path = metadata.get("output_path", "")
         return f"Downloaded file from {url} to {output_path}"
+        
+    elif tool_name == "exit":
+        sys.exit(0)
 
     # ... handle other tools ...
     else:
