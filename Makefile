@@ -27,7 +27,7 @@ task.txt:
 
 task: task.txt
 	. venv/bin/activate && \
-	LLM_OPENROUTER_API_KEY=$$(cat .api.key) llm prompt "gemini-2.5-pro-exp-03-25" "$$(cat task.txt)" | python parse_llm_tool_call.py
+	LLM_GEMINI_KEY=$$(cat .api.key) llm prompt -m "gemini-2.5-pro-exp-03-25" "$$(cat task.txt)" | python parse_llm_tool_call.py
 	$(call success)
 
 clean-task:
