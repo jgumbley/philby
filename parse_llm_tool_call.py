@@ -7,6 +7,7 @@ def main():
     # Collect the entire LLM response from stdin
     llm_output = sys.stdin.read()
 
+    # Print the raw LLM output to the screen
     print("----- LLM OUTPUT START -----")
     print(llm_output)
     print("----- LLM OUTPUT END -------\n")
@@ -18,6 +19,7 @@ def main():
 
     if not matches:
         print("No tool calls found. Exiting.")
+        sys.stdout.flush()  # Ensure output is displayed immediately
         return
 
     # If multiple tool calls, handle them in sequence (or however you prefer).
@@ -40,6 +42,7 @@ def main():
         # 4. Provide result or error
         print("Tool result:")
         print(result)
+        print()  # Add extra line for better readability
 
 def run_tool(tool_name, metadata):
     """
