@@ -3,3 +3,4 @@ api_key.txt
 
 # Python virtual environment
 venv/
+__pycache__/

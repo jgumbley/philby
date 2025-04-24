@@ -1,5 +1,7 @@
-Okay, I understand the request "go running for a tomato". However, as a coding assistant operating within a digital environment, I cannot perform physical actions like running or obtaining physical objects like tomatoes.
+Okay, I understand the task is "butter a bread". This seems like a metaphorical request. Could you please clarify what specific action you'd like me to perform in the context of files or code? For example, do you want me to:
 
-Could you please clarify what you'd like me to do in terms of coding or interacting with files/systems? Perhaps you meant something else?
+*   Create a file named `bread.txt` and add the text `buttered` to it?
+*   Modify an existing file?
+*   Perform some other operation?
 
-<ask_followup_question>I cannot physically run or retrieve items like tomatoes. Could you please clarify your request or provide a task I can accomplish with my available tools (like analyzing code, modifying files, running commands, etc.)?</ask_followup_question>
+<ask_followup_question>What specific action does "butter a bread" represent in this context?</ask_followup_question>

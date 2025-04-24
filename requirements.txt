@@ -1,3 +1,4 @@
 llm
 llm-gemini
 modelcontextprotocol
+python-cowsay

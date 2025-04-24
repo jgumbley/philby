@@ -8,6 +8,11 @@ define success
 	tput sgr0;
 endef
 
+define say 
+	. venv/bin/activate && \
+		python say.py "$$(cat task.txt)"
+endef
+
 .PHONY: all clean readme prompt clean-% clean-history
 
 all: task
@@ -25,7 +30,8 @@ task.txt:
 	echo "$$user_input" >> task.txt
 	$(call success)
 
-task: task.txt
+task: task.txt venv
+	$(call say)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
 	cat task.txt | llm prompt -m "gemini-2.5-pro-exp-03-25" | python parse.py output.txt
