@@ -1,9 +1,5 @@
-Okay, I can help with that. To find the most current scientific consensus on the age of the sun, I should perform a web search.
+Okay, I can help with that. I need to search the web to find the most current estimate for the age of the sun.
 
-```python
 <mcp__web_search>
   <query>age of the sun</query>
 </mcp__web_search>
-```
-
-
