@@ -4,3 +4,13 @@ api_key.txt
 # Python virtual environment
 venv/
 __pycache__/
+
+# Current working state
+id.txt
+task.txt
+prompt.txt
+thinking.txt
+action.txt
+history.txt
+
+history.xml

@@ -15,9 +15,11 @@ endef
 
 .PHONY: all clean readme prompt clean-% clean-history save_xml
 
-all: clean-task task
-	$(call success)
+all: loop
 
+loop: save_xml
+	$(call success)
+	
 make.txt:
 	man make > make.txt
 	$(call success)
@@ -32,11 +34,14 @@ task.txt:
 	echo "$$user_input" >> task.txt
 	$(call success)
 
-task: make.txt task.txt venv
+prompt.txt:
+	cat README.md make.txt task.txt > prompt.txt
+
+thinking.txt: make.txt task.txt venv prompt.txt
 	$(call say)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
-	cat make.txt README.md task.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
+	cat prompt.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
 clean-task:
@@ -54,9 +59,19 @@ id.txt: venv
 	python generate_id.py id.txt
 	$(call success)
 
+history.txt: venv
+	. venv/bin/activate && \
+	python summarize_history.py > history.txt
+	$(call success)
+
 save_xml: venv task.txt id.txt
 	. venv/bin/activate && \
 	cat thinking.txt | python save_history.py > history.xml
+	rm id.txt
+	$(call success)
+
+clean-history:
+	rm -f history.txt
 	$(call success)
 
 clean:
