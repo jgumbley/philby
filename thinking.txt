@@ -1,5 +1,7 @@
-Okay, I can help with that. I need to search the web to find the most current estimate for the age of the sun.
+Okay, I need to find the age of the sun. This is a scientific fact, so a web search is the best way to get the current accepted value.
 
+```tool_code
 <mcp__web_search>
   <query>age of the sun</query>
 </mcp__web_search>
+```

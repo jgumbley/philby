@@ -13,7 +13,7 @@ define say
 		python say.py "$$(cat task.txt)"
 endef
 
-.PHONY: all clean readme prompt clean-% clean-history
+.PHONY: all clean readme prompt clean-% clean-history save_xml
 
 all: task
 	$(call success)
@@ -47,6 +47,16 @@ venv: requirements.txt
 	python3 -m venv venv
 	. venv/bin/activate && \
 	pip install -r requirements.txt
+	$(call success)
+
+id.txt: venv
+	. venv/bin/activate && \
+	python generate_id.py id.txt
+	$(call success)
+
+save_xml: venv task.txt id.txt
+	. venv/bin/activate && \
+	cat thinking.txt | python save_history.py > history.xml
 	$(call success)
 
 clean:
