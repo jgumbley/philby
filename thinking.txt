@@ -1,7 +1,11 @@
-Okay, I need to find the age of the sun. This is a scientific fact, so a web search is the best way to get the current accepted value.
+Okay, I understand the request. This requires historical astronomical data.
 
-```tool_code
-<mcp__web_search>
-  <query>age of the sun</query>
-</mcp__web_search>
-```
+1.  **ANALYSIS:** The task is to find the dates of the first two lunar eclipses that occurred after the year 1 AD. This information isn't typically stored locally and requires accessing external knowledge.
+2.  **SELECT Tool:** The most appropriate tool is `<mcp__web_search>` to find this historical astronomical information.
+3.  **REQUEST:**
+
+    ```tool_code
+    <mcp__web_search>
+        <query>first two lunar eclipses after 1 AD dates</query>
+    </mcp__web_search>
+    ```

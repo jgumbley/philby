@@ -32,7 +32,7 @@ task.txt:
 	echo "$$user_input" >> task.txt
 	$(call success)
 
-task: task.txt venv
+task: make.txt task.txt venv
 	$(call say)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
