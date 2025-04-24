@@ -23,8 +23,6 @@ readme:
 	$(call success)
 
 task.txt:
-	@cat README.md > task.txt
-	@echo "---------------------------------------" >> task.txt
 	@read -p "Enter your task: " user_input && \
 	echo "---This is your task---" >> task.txt && \
 	echo "$$user_input" >> task.txt
@@ -34,7 +32,7 @@ task: task.txt venv
 	$(call say)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
-	cat task.txt | llm prompt -m "gemini-2.5-pro-exp-03-25" | python parse.py output.txt
+	cat README.md task.txt | llm prompt -m "gemini-2.5-pro-exp-03-25" | python gather.py thinking.txt
 	$(call success)
 
 clean-task:

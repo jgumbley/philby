@@ -1,7 +1,5 @@
-Okay, I understand the task is "butter a bread". This seems like a metaphorical request. Could you please clarify what specific action you'd like me to perform in the context of files or code? For example, do you want me to:
+Okay, I understand the task is "butter a bread". This seems like a metaphorical instruction. To proceed, I need to understand what "bread" represents (e.g., a specific file or project) and what "butter" means in this context (e.g., adding specific content, modifying a setting, etc.).
 
-*   Create a file named `bread.txt` and add the text `buttered` to it?
-*   Modify an existing file?
-*   Perform some other operation?
+Could you please clarify what file(s) I should work with and what action "buttering" entails?
 
-<ask_followup_question>What specific action does "butter a bread" represent in this context?</ask_followup_question>
+<ask_followup_question> What does 'butter a bread' mean in terms of files and actions? For example, which file is the 'bread' and what content or change represents the 'butter'? </ask_followup_question>
