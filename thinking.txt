@@ -1,11 +1,5 @@
-Okay, I understand the request. This requires historical astronomical data.
+Okay, I understand the task. To find the dates of the first two solar eclipses after 1 AD, I need to consult external astronomical data. I will use a web search for this.
 
-1.  **ANALYSIS:** The task is to find the dates of the first two lunar eclipses that occurred after the year 1 AD. This information isn't typically stored locally and requires accessing external knowledge.
-2.  **SELECT Tool:** The most appropriate tool is `<mcp__web_search>` to find this historical astronomical information.
-3.  **REQUEST:**
-
-    ```tool_code
-    <mcp__web_search>
-        <query>first two lunar eclipses after 1 AD dates</query>
-    </mcp__web_search>
-    ```
+```tool_code
+print(web_search.search(query="date of first two solar eclipses after 1 AD"))
+```
