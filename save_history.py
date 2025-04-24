@@ -40,27 +40,28 @@ def create_entry(task_content, observations_content, thinking_content, action_co
     return root
 
 def append_to_history(entry, history_file):
-    """Append entry to history file"""
+    """Append entry to history file, ensuring proper XML structure"""
     # Create root element if file doesn't exist
     if not os.path.exists(history_file):
         root = ET.Element("history")
-        tree = ET.ElementTree(root)
+        root.append(entry)
     else:
         try:
+            # Parse existing file
             tree = ET.parse(history_file)
             root = tree.getroot()
+            
+            # Append new entry to existing root
+            root.append(entry)
         except ET.ParseError:
-            # File exists but is not valid XML, create new root
+            # File exists but is not valid XML, create new root with this entry
             root = ET.Element("history")
-            tree = ET.ElementTree(root)
-    
-    # Append new entry
-    root.append(entry)
+            root.append(entry)
     
     # Pretty print XML
     xmlstr = md.parseString(ET.tostring(root)).toprettyxml(indent="  ")
     
-    # Write to file
+    # Write back to file
     with open(history_file, 'w') as f:
         f.write(xmlstr)
 

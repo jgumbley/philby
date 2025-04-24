@@ -15,7 +15,7 @@ endef
 
 .PHONY: all clean readme prompt clean-% clean-history save_xml
 
-all: task
+all: clean-task task
 	$(call success)
 
 make.txt:
@@ -36,11 +36,11 @@ task: make.txt task.txt venv
 	$(call say)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
-	cat make.txt README.md task.txt | llm prompt -m "gemini-2.5-pro-exp-03-25" | python gather.py thinking.txt
+	cat make.txt README.md task.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
 clean-task:
-	rm task.txt
+	rm -F task.txt
 	$(call success)
 
 venv: requirements.txt
