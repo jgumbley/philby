@@ -28,12 +28,8 @@ task.txt:
 task: task.txt
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
-	cat task.txt | llm prompt -m "gemini-2.5-pro-exp-03-25"
+	cat task.txt | llm prompt -m "gemini-2.5-pro-exp-03-25" | python parse.py output.txt
 	$(call success)
-
-run: task.txt
-	. venv/bin/activate && \
-	cat task.txt | LLM_GEMINI_KEY=$$(cat .api.key) llm chat --model "gemini-2.5-pro-exp-03-25" | python parse_llm_tool_call.py
 
 clean-task:
 	rm task.txt
