@@ -5,6 +5,9 @@ define success
 	n=$$(expr $$(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 5 + 1); \
 	owl=$$(echo $$owls | cut -d' ' -f$$n); \
 	printf "%s > \033[33m%s\033[0m completed [OK]\n" "$$owl" "$(@)"; \
+	id_content=$$(cat id.txt 2>/dev/null || echo "no-id"); \
+	printf "{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$id_content" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
+	echo "---"; \
 	tput sgr0;
 endef
 
@@ -19,15 +22,12 @@ all: loop
 	$(call success)
 
 step: action.txt
-	rm -f id.txt
-	rm -f prompt.txt
 	rm -f thinking.txt
-	rm -f action.txt
+	rm -f prompt.txt
+	rm -f id.txt
 	$(call success)
 	
 loop: step
-	. venv/bin/activate && \
-	python save_history.py task.txt id.txt prompt.txt thinking.txt action.txt > history.xml
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
@@ -37,6 +37,11 @@ loop: step
 			$(MAKE) loop; \
 		fi; \
 	fi
+	$(call success)
+
+save_history:
+	. venv/bin/activate && \
+	python save_history.py task.txt id.txt prompt.txt thinking.txt action.txt > history.xml
 	$(call success)
 	
 make.txt:
@@ -65,7 +70,7 @@ action.txt: venv thinking.txt
 	cat thinking.txt | python parse.py action.txt
 	$(call success)
 
-clean-task:
+new:
 	rm -f task.txt
 	$(call success)
 

@@ -78,9 +78,18 @@ def main():
     stop_spinner.set()
     spinner.join()
     
-    # Write content to output file
+    # Extract tool calls from the content
+    text = ''.join(content)
+    tool_pattern = r"<(\w+)>(.*?)</\1>"
+    matches = re.findall(tool_pattern, text, flags=re.DOTALL)
+    
+    # Write only the tool calls to output file
     with open(output_file, 'w') as f:
-        f.writelines(content)
+        if matches:
+            for (tool_name, raw_json) in matches:
+                f.write(f"<{tool_name}>{raw_json}</{tool_name}>\n")
+        else:
+            f.write("No tool calls found.\n")
     
     # Process any tool calls in the content
     process_tool_calls(content)
