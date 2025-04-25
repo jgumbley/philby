@@ -7,6 +7,7 @@ Observe (Observations)
 
 Ingest task details, environment context, and history
 Analyze relevant files and system state
+Critically assess success or failure of previous action
 Process previous results and feedback
 
 

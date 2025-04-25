@@ -6,7 +6,7 @@ define success
 	owl=$$(echo $$owls | cut -d' ' -f$$n); \
 	printf "%s > \033[33m%s\033[0m completed [OK]\n" "$$owl" "$(@)"; \
 	id_content=$$(cat id.txt 2>/dev/null || echo "no-id"); \
-	printf "{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$id_content" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
+	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$id_content" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
 	echo "---"; \
 	tput sgr0;
 endef
@@ -21,7 +21,8 @@ endef
 all: loop
 	$(call success)
 
-step: action.txt
+step: decision.txt
+	rm -f action.txt
 	rm -f thinking.txt
 	rm -f prompt.txt
 	rm -f id.txt
@@ -65,9 +66,9 @@ thinking.txt: make.txt task.txt venv prompt.txt
 	cat prompt.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
-action.txt: venv thinking.txt
+decision.txt: venv thinking.txt
 	. venv/bin/activate && \
-	cat thinking.txt | python parse.py action.txt
+	cat thinking.txt | python parse.py decision.txt
 	$(call success)
 
 new:

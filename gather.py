@@ -6,14 +6,18 @@ import itertools
 def spinner_thread(stop_event):
     # Final Fantasy/Persona 3 inspired spinner frames
     frames = ["✨", "🌙", "⚔️", "🔮", "💫", "⭐", "🌟", "🪄"]
+    # Write a newline once at the beginning
+    sys.stderr.write("\n")
+    sys.stderr.flush()
     for frame in itertools.cycle(frames):
         if stop_event.is_set():
             break
-        sys.stderr.write(f"\r[{frame}] Gathering wisdom... ")
+        sys.stderr.write(f"\r[{frame}] Gathering thoughts... ")
         sys.stderr.flush()
         time.sleep(0.2)
-    sys.stderr.write("\r                          \r")
+    sys.stderr.write("\r                                      \r")
     sys.stderr.flush()
+    # Don't add a newline after finishing
 
 def main():
     if len(sys.argv) != 2:
