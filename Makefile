@@ -22,17 +22,14 @@ all: loop
 	$(call success)
 
 step: decision.txt
-	rm -f action.txt
-	rm -f thinking.txt
-	rm -f prompt.txt
-	rm -f id.txt
+	rm -f action.txt thinking.txt prompt.txt id.txt
 	$(call success)
 	
 loop: step
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
-		cat action.txt; \
+		cat decision.txt; \
 		read -p "Authorise? [y/N] " answer; \
 		if [ "$${answer}" = "y" ]; then \
 			$(MAKE) loop; \
