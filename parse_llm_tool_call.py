@@ -90,6 +90,13 @@ def run_tool(tool_name, metadata):
     elif tool_name == "exit":
         sys.exit(0)
 
+    elif tool_name == "mark_task_done":
+        reason = metadata.get("reason", "task complete")
+        with open("done.txt", "w", encoding="utf-8") as f:
+            f.write(reason + "\n")
+        print(f"Task marked done: {reason}")
+        return "__PHILBY_DONE__"
+
     # ... handle other tools ...
     else:
         return f"Unknown tool: {tool_name}"

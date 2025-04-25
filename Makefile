@@ -8,16 +8,20 @@ define success
 	tput sgr0;
 endef
 
-define say 
+define say
 	. venv/bin/activate && \
-		python say.py "$$(cat task.txt)"
+		python say.py "$$(cat $(1))"
 endef
 
 .PHONY: all clean readme prompt clean-% clean-history save_xml
 
-all: loop
+done: done.txt
+	$(call say,done.txt)
+	$(call success)
 
-loop: save_xml
+done.txt: save_xml
+	ps
+	make
 	$(call success)
 	
 make.txt:
@@ -38,14 +42,14 @@ prompt.txt:
 	cat README.md make.txt task.txt > prompt.txt
 
 thinking.txt: make.txt task.txt venv prompt.txt
-	$(call say)
+	$(call say,task.txt)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
 	cat prompt.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
 clean-task:
-	rm -F task.txt
+	rm -f task.txt
 	$(call success)
 
 venv: requirements.txt
@@ -64,14 +68,18 @@ history.txt: venv
 	python summarize_history.py > history.txt
 	$(call success)
 
-save_xml: venv task.txt id.txt
+action.txt: venv thinking.txt
 	. venv/bin/activate && \
-	cat thinking.txt | python save_history.py > history.xml
-	rm id.txt
+	cat thinking.txt | python parse.py action.txt
 	$(call success)
 
-clean-history:
-	rm -f history.txt
+save_xml: venv action.txt
+	. venv/bin/activate && \
+	python save_history.py task.txt id.txt prompt.txt thinking.txt action.txt > history.xml
+	rm -f id.txt
+	rm -f prompt.txt
+	rm -f thinking.txt
+	rm -f action.txt
 	$(call success)
 
 clean:
