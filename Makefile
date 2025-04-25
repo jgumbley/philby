@@ -16,13 +16,18 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: clean clean-% save_xml step loop
+.PHONY: clean clean-% step loop memory save_history
 
 all: loop
 	$(call success)
 
+memory/.git:
+	mkdir -p memory
+	$(MAKE) -C memory init
+	$(call success)
+
 step: decision.txt
-	rm -f action.txt thinking.txt prompt.txt id.txt
+	rm -f action.txt thinking.txt prompt.txt
 	$(call success)
 	
 loop: step
@@ -37,9 +42,13 @@ loop: step
 	fi
 	$(call success)
 
-save_history:
-	. venv/bin/activate && \
-	python save_history.py task.txt id.txt prompt.txt thinking.txt action.txt > history.xml
+save_history: memory/.git
+	cp task.txt memory/ 2>/dev/null || echo "" > memory/task.txt
+	cp thinking.txt memory/ 2>/dev/null || echo "" > memory/thinking.txt
+	cp prompt.txt memory/ 2>/dev/null || echo "" > memory/prompt.txt
+	cp action.txt memory/ 2>/dev/null || echo "" > memory/action.txt
+	$(MAKE) -C memory commit
+	$(MAKE) -C memory id > id.txt
 	$(call success)
 	
 make.txt:
@@ -78,9 +87,8 @@ venv: requirements.txt
 	pip install -r requirements.txt
 	$(call success)
 
-id.txt: venv
-	. venv/bin/activate && \
-	python generate_id.py id.txt
+id.txt: memory/.git
+	$(MAKE) -C memory id > id.txt
 	$(call success)
 
 history.txt: venv
