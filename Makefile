@@ -13,15 +13,28 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: done clean clean-% clean-history save_xml
+.PHONY: clean clean-% save_xml step loop
 
-done: done.txt
-	$(call say,done.txt)
+all: loop
+
+step: action.txt
+	rm -f id.txt
+	rm -f prompt.txt
+	rm -f thinking.txt
+	rm -f action.txt
 	$(call success)
-
-done.txt: save_xml
-	ps
-	make
+	
+loop: step
+	. venv/bin/activate && \
+	python save_history.py task.txt id.txt prompt.txt thinking.txt action.txt > history.xml
+	@if [ -f done.txt ]; then \
+		echo "Done marker found. Loop completed."; \
+	else \
+		read -p "Authorise? [y/N] " answer; \
+		if [ "$${answer}" = "y" ]; then \
+			$(MAKE) loop; \
+		fi; \
+	fi
 	$(call success)
 	
 make.txt:
@@ -36,12 +49,18 @@ task.txt:
 
 prompt.txt:
 	cat README.md make.txt task.txt > prompt.txt
+	$(call success)
 
 thinking.txt: make.txt task.txt venv prompt.txt
 	$(call say,task.txt)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
 	cat prompt.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
+	$(call success)
+
+action.txt: venv thinking.txt
+	. venv/bin/activate && \
+	cat thinking.txt | python parse.py action.txt
 	$(call success)
 
 clean-task:
@@ -62,20 +81,6 @@ id.txt: venv
 history.txt: venv
 	. venv/bin/activate && \
 	python summarize_history.py > history.txt
-	$(call success)
-
-action.txt: venv thinking.txt
-	. venv/bin/activate && \
-	cat thinking.txt | python parse.py action.txt
-	$(call success)
-
-save_xml: venv action.txt
-	. venv/bin/activate && \
-	python save_history.py task.txt id.txt prompt.txt thinking.txt action.txt > history.xml
-	rm -f id.txt
-	rm -f prompt.txt
-	rm -f thinking.txt
-	rm -f action.txt
 	$(call success)
 
 clean:

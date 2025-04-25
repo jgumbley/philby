@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import sys
 
 def main():
@@ -15,7 +14,5 @@ def main():
     with open(output_file, 'w') as f:
         f.write(content)
     
-    print(f"Thinking written to {output_file}", file=sys.stderr)
-
 if __name__ == "__main__":
     main()
