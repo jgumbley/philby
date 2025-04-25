@@ -13,7 +13,7 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: all clean readme prompt clean-% clean-history save_xml
+.PHONY: done clean clean-% clean-history save_xml
 
 done: done.txt
 	$(call say,done.txt)
@@ -26,10 +26,6 @@ done.txt: save_xml
 	
 make.txt:
 	man make > make.txt
-	$(call success)
-
-readme:
-	@cat README.md
 	$(call success)
 
 task.txt:

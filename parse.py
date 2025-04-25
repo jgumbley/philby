@@ -3,6 +3,8 @@ import sys
 import time
 import threading
 import signal
+import re
+import json
 
 def spinner_thread(stop_event):
     """Display a spinning animation in the terminal."""
@@ -21,6 +23,31 @@ def signal_handler(sig, frame):
     """Handle Ctrl+C gracefully."""
     print("\nInterrupted by user. Exiting...", file=sys.stderr)
     sys.exit(1)
+
+def process_tool_calls(content):
+    """Process any tool calls found in the content."""
+    text = ''.join(content)
+    
+    # Look for tool calls in format <toolName>...</toolName>
+    tool_pattern = r"<(\w+)>(.*?)</\1>"
+    matches = re.findall(tool_pattern, text, flags=re.DOTALL)
+    
+    for (tool_name, raw_json) in matches:
+        print(f"Found tool call: {tool_name}", file=sys.stderr)
+        
+        # Attempt to parse the contents between the tags as JSON
+        try:
+            metadata = json.loads(raw_json)
+        except json.JSONDecodeError:
+            print(f"Could not parse tool metadata as JSON: {raw_json}", file=sys.stderr)
+            continue
+        
+        # Handle specific tool calls
+        if tool_name == "mark_task_done":
+            reason = metadata.get("reason", "task complete")
+            with open("done.txt", "w", encoding="utf-8") as f:
+                f.write(reason + "\n")
+            print(f"Task marked done: {reason}", file=sys.stderr)
 
 def main():
     if len(sys.argv) != 2:
@@ -54,6 +81,9 @@ def main():
     # Write content to output file
     with open(output_file, 'w') as f:
         f.writelines(content)
+    
+    # Process any tool calls in the content
+    process_tool_calls(content)
     
     print(f"Output written to {output_file}", file=sys.stderr)
 
