@@ -16,6 +16,7 @@ endef
 .PHONY: clean clean-% save_xml step loop
 
 all: loop
+	$(call success)
 
 step: action.txt
 	rm -f id.txt
@@ -30,6 +31,7 @@ loop: step
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
+		cat action.txt; \
 		read -p "Authorise? [y/N] " answer; \
 		if [ "$${answer}" = "y" ]; then \
 			$(MAKE) loop; \
