@@ -19,5 +19,5 @@ done.txt
 history.xml
 
 # Memory text files
-memory/*.txt
+memory/*
 !memory/Makefile
