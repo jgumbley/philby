@@ -51,10 +51,6 @@ save_history: memory/.git
 	$(MAKE) -C memory id > id.txt
 	$(call success)
 	
-make.txt:
-	man make > make.txt
-	$(call success)
-
 task.txt:
 	@read -p "Enter your task: " user_input && \
 	echo "---This is your task---" >> task.txt && \
@@ -62,7 +58,7 @@ task.txt:
 	$(call success)
 
 prompt.txt:
-	cat README.md make.txt task.txt > prompt.txt
+	cat README.md task.txt > prompt.txt
 	$(call success)
 
 thinking.txt: make.txt task.txt venv prompt.txt
@@ -78,7 +74,15 @@ decision.txt: venv thinking.txt
 	$(call success)
 
 action.txt: venv decision.txt
-	echo run action here
+	@if grep -q "ask_handler" decision.txt; then \
+		prompt=$$(cat decision.txt | grep -o '"prompt":"[^"]*"' | cut -d'"' -f4); \
+		echo "$$prompt"; \
+		read -p "> " user_response; \
+		echo "$$user_response" > action.txt; \
+	else \
+		. venv/bin/activate && \
+		python mcp_client.py decision.txt > action.txt; \
+	fi
 	$(call success)
 
 new:
