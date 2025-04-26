@@ -4,7 +4,7 @@ define success
 	owls="🦉 🦆 🦢 🐦 🦜"; \
 	n=$$(expr $$(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 5 + 1); \
 	owl=$$(echo $$owls | cut -d' ' -f$$n); \
-	printf "%s > \033[33m%s\033[0m completed [OK]\n" "$$owl" "$(@)"; \
+	printf "%s > \033[33m%s\033[0m done\n" "$$owl" "$(@)"; \
 	id_content=$$(cat id.txt 2>/dev/null || echo "no-id"); \
 	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$id_content" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
 	echo "---"; \
@@ -26,7 +26,7 @@ memory/.git:
 	$(MAKE) -C memory init
 	$(call success)
 
-step: decision.txt
+step: action.txt
 	rm -f action.txt thinking.txt prompt.txt
 	$(call success)
 	
@@ -43,10 +43,10 @@ loop: step
 	$(call success)
 
 save_history: memory/.git
-	cp task.txt memory/ 2>/dev/null || echo "" > memory/task.txt
-	cp thinking.txt memory/ 2>/dev/null || echo "" > memory/thinking.txt
-	cp prompt.txt memory/ 2>/dev/null || echo "" > memory/prompt.txt
-	cp action.txt memory/ 2>/dev/null || echo "" > memory/action.txt
+	cp thinking.txt memory/thinking.txt
+	cp task.txt memory/task.txt
+	cp prompt.txt memory/prompt.txt
+	cp action.txt memory/action.txt
 	$(MAKE) -C memory commit
 	$(MAKE) -C memory id > id.txt
 	$(call success)
@@ -75,6 +75,10 @@ thinking.txt: make.txt task.txt venv prompt.txt
 decision.txt: venv thinking.txt
 	. venv/bin/activate && \
 	cat thinking.txt | python parse.py decision.txt
+	$(call success)
+
+action.txt: venv decision.txt
+	echo run action here
 	$(call success)
 
 new:
