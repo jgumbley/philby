@@ -1,5 +1,6 @@
 llm
 llm-gemini
-modelcontextprotocol
 python-cowsay
 argon2-cffi
+pydantic
+fastmcp

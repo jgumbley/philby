@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 import sys
 import time
 import threading
 import signal
-import re
 import json
+from decision_schema import Decision
 
 def spinner_thread(stop_event):
     """Display a spinning animation in the terminal."""
@@ -24,37 +23,7 @@ def signal_handler(sig, frame):
     print("\nInterrupted by user. Exiting...", file=sys.stderr)
     sys.exit(1)
 
-def process_tool_calls(content):
-    """Process any tool calls found in the content."""
-    text = ''.join(content)
-    
-    # Look for tool calls in format <toolName>...</toolName>
-    tool_pattern = r"<(\w+)>(.*?)</\1>"
-    matches = re.findall(tool_pattern, text, flags=re.DOTALL)
-    
-    for (tool_name, raw_json) in matches:
-        print(f"Found tool call: {tool_name}", file=sys.stderr)
-        
-        # Attempt to parse the contents between the tags as JSON
-        try:
-            metadata = json.loads(raw_json)
-        except json.JSONDecodeError:
-            print(f"Could not parse tool metadata as JSON: {raw_json}", file=sys.stderr)
-            continue
-        
-        # Handle specific tool calls
-        if tool_name == "mark_task_done":
-            reason = metadata.get("reason", "task complete")
-            with open("done.txt", "w", encoding="utf-8") as f:
-                f.write(reason + "\n")
-            print(f"Task marked done: {reason}", file=sys.stderr)
-
 def main():
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <output_file>", file=sys.stderr)
-        sys.exit(1)
-    
-    output_file = sys.argv[1]
     signal.signal(signal.SIGINT, signal_handler)
     
     # Create and start the spinner thread
@@ -63,11 +32,9 @@ def main():
     spinner.daemon = True
     spinner.start()
     
-    # Process the input stream and save to output file
-    content = []
+    # Read all input as a single string
     try:
-        for line in sys.stdin:
-            content.append(line)
+        input_data = sys.stdin.read()
     except KeyboardInterrupt:
         stop_spinner.set()
         spinner.join()
@@ -78,23 +45,43 @@ def main():
     stop_spinner.set()
     spinner.join()
     
-    # Extract tool calls from the content
-    text = ''.join(content)
-    tool_pattern = r"<(\w+)>(.*?)</\1>"
-    matches = re.findall(tool_pattern, text, flags=re.DOTALL)
-    
-    # Write only the tool calls to output file
-    with open(output_file, 'w') as f:
-        if matches:
-            for (tool_name, raw_json) in matches:
-                f.write(f"<{tool_name}>{raw_json}</{tool_name}>\n")
+    # Try to extract JSON from input (even if embedded in other text)
+    try:
+        # Try to find JSON content between triple backticks or regular JSON
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', input_data, re.DOTALL)
+        
+        if json_match:
+            json_str = json_match.group(1).strip()
         else:
-            f.write("No tool calls found.\n")
+            # Try to find anything that looks like JSON
+            json_str = input_data.strip()
+            
+        json_data = json.loads(json_str)
+        
+        # Be more permissive by handling variations in input format
+        if "tool_name" in json_data and "parameters" in json_data:
+            # Convert from the format in thinking.txt to the expected format
+            tool_call = {"name": json_data["tool_name"], "args": json_data["parameters"]}
+            json_data = {"tool_call": tool_call}
+        
+        decision = Decision(**json_data)
+        
+        # Use the validated JSON string for saving
+        validated_json_str = json_str
+            
+    except json.JSONDecodeError:
+        print("Error: Could not extract valid JSON from input", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: Input does not match Decision schema: {str(e)}", file=sys.stderr)
+        sys.exit(1)
     
-    # Process any tool calls in the content
-    process_tool_calls(content)
+    # Write validated JSON to decision.txt
+    with open("decision.txt", 'w') as f:
+        f.write(validated_json_str)
     
-    print(f"Output written to {output_file}", file=sys.stderr)
+    print("Decision validated and saved to decision.txt", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

@@ -28,34 +28,19 @@ RULES:
 - Use ONE tool at a time
 - WAIT for user confirmation after each action
 - THINK carefully before selecting tools
-- FORMAT tool requests using proper XML syntax (see below)
+- FORMAT decisions as single-line JSON objects
 - NEVER assume success without confirmation
 - PROCEED step-by-step, adapting based on results
 
-## Tool Call Format
+## Decision Format
 
-Tool calls MUST be formatted as follows:
-```
-<toolName>{"param1": "value1", "param2": "value2"}</toolName>
-```
+Each agent output must be a single-line JSON object conforming to the Decision schema. This schema defines the structure for how the agent communicates its next action.
 
-Where:
-- `toolName` is the exact name of the tool to call (e.g., ANALYZE, SELECT, mark_task_done)
-- Content between the tags must be valid JSON with the tool's parameters
-- No nested XML tags are allowed within a tool call
+There are two types of decisions an agent can make:
 
-Examples:
-```
-<mark_task_done>{"reason": "Task completed successfully"}</mark_task_done>
-```
+1. Tool Call: A decision to use a specific tool with arguments, such as analyzing a file with the path "/tmp/code.py" and parameters for line counts.
 
-```
-<ANALYZE>{"filepath": "/path/to/file.txt"}</ANALYZE>
-```
-
-```
-<SELECT>{"filepath": "/path/to/output.txt", "content": "This is the content to write"}</SELECT>
-```
+2. Ask Handler: A decision to escalate to human judgment, such as requesting clarification on ambiguous requirements with specific questions for the user.
 
 Philosophy & Heritage
 ---------------------
