@@ -4,3 +4,4 @@ python-cowsay
 argon2-cffi
 pydantic
 fastmcp
+files-to-prompt

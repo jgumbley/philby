@@ -109,6 +109,5 @@ history.txt: venv
 
 clean:
 	rm -Rf venv
-	rm make.txt
 	$(call success)
 
