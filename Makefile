@@ -22,7 +22,7 @@ all: loop
 	$(call success)
 
 api.key:
-    $(error Please set your LLM API key in api.key)
+	$(error 'error missing api.key')
 
 memory/.git:
 	mkdir -p memory
