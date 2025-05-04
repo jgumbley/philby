@@ -61,7 +61,7 @@ prompt.txt:
 	cat README.md task.txt > prompt.txt
 	$(call success)
 
-thinking.txt: make.txt task.txt venv prompt.txt
+thinking.txt: task.txt venv prompt.txt
 	$(call say,task.txt)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
