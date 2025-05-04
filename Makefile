@@ -21,6 +21,9 @@ endef
 all: loop
 	$(call success)
 
+api.key:
+    $(error Please set your LLM API key in api.key)
+
 memory/.git:
 	mkdir -p memory
 	$(MAKE) -C memory init
@@ -61,10 +64,10 @@ prompt.txt:
 	cat README.md task.txt > prompt.txt
 	$(call success)
 
-thinking.txt: task.txt venv prompt.txt
+thinking.txt: api.key task.txt venv prompt.txt
 	$(call say,task.txt)
 	. venv/bin/activate && \
-	export LLM_GEMINI_KEY=$$(cat api_key.txt) && \
+	export LLM_GEMINI_KEY=$$(cat api.key) && \
 	cat prompt.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
