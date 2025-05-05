@@ -15,14 +15,14 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: clean clean-% step loop memory save_history log
+.PHONY: clean clean-% step loop log
 
 all: loop
 	$(call success)
 
 log:
 	. venv/bin/activate && \
-	llm log
+	llm logs
 	$(call success)
 
 api.key:
@@ -32,7 +32,7 @@ step: action.txt
 	rm -f action.txt thinking.txt prompt.txt
 	$(call success)
 	
-loop: step
+loop:
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
