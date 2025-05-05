@@ -5,8 +5,7 @@ define success
 	n=$$(expr $$(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 5 + 1); \
 	owl=$$(echo $$owls | cut -d' ' -f$$n); \
 	printf "%s > \033[33m%s\033[0m done\n" "$$owl" "$(@)"; \
-	id_content=$$(cat id.txt 2>/dev/null || echo "no-id"); \
-	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$id_content" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
+	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
 	echo "---"; \
 	tput sgr0;
 endef
@@ -16,9 +15,14 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: clean clean-% step loop memory save_history
+.PHONY: clean clean-% step loop memory save_history log
 
 all: loop
+	$(call success)
+
+log:
+	. venv/bin/activate && \
+	llm log
 	$(call success)
 
 api.key:
@@ -54,7 +58,7 @@ thinking.txt: api.key task.txt venv prompt.txt
 	$(call say,task.txt)
 	. venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api.key) && \
-	cat prompt.txt | llm prompt -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
+	cat prompt.txt | llm prompt -c -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
 decision.txt: venv thinking.txt

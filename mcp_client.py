@@ -1,4 +1,4 @@
-from fastmcp import FastMCPClient
+from fastmcp import Client as FastMCPClient
 from decision_schema import Decision
 import logging
 
