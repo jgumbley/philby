@@ -24,11 +24,6 @@ all: loop
 api.key:
 	$(error 'error missing api.key')
 
-memory/.git:
-	mkdir -p memory
-	$(MAKE) -C memory init
-	$(call success)
-
 step: action.txt
 	rm -f action.txt thinking.txt prompt.txt
 	$(call success)
@@ -45,15 +40,6 @@ loop: step
 	fi
 	$(call success)
 
-save_history: memory/.git
-	cp thinking.txt memory/thinking.txt
-	cp task.txt memory/task.txt
-	cp prompt.txt memory/prompt.txt
-	cp action.txt memory/action.txt
-	$(MAKE) -C memory commit
-	$(MAKE) -C memory id > id.txt
-	$(call success)
-	
 task.txt:
 	@read -p "Enter your task: " user_input && \
 	echo "---This is your task---" >> task.txt && \
@@ -96,15 +82,6 @@ venv: requirements.txt
 	python3 -m venv venv
 	. venv/bin/activate && \
 	pip install -r requirements.txt
-	$(call success)
-
-id.txt: memory/.git
-	$(MAKE) -C memory id > id.txt
-	$(call success)
-
-history.txt: venv
-	. venv/bin/activate && \
-	python summarize_history.py > history.txt
 	$(call success)
 
 clean:
