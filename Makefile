@@ -31,7 +31,7 @@ step: action.txt
 	rm -f action.txt thinking.txt prompt.txt
 	$(call success)
 	
-loop:
+loop: decision.txt
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
