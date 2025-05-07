@@ -15,14 +15,13 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: clean clean-% step loop log
+.PHONY: step loop log
 
 all: loop
 	$(call success)
 
 log:
-	. venv/bin/activate && \
-	llm logs
+	. venv/bin/activate && llm logs
 	$(call success)
 
 api.key:
