@@ -1,13 +1,11 @@
 define success
 	@tput setaf 2; \
 	echo ""; \
-	owls="🦉 🦆 🦢 🐦 🦜"; \
+	icons="🕵️ 🔒 📡 🗝️ 🥃"; \
 	n=$$(expr $$(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 5 + 1); \
-	owl=$$(echo $$owls | cut -d' ' -f$$n); \
-	printf "%s > \033[33m%s\033[0m done\n" "$$owl" "$(@)"; \
-	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; \
-	echo "---"; \
-	tput sgr0;
+	icon=$$(echo $$icons | cut -d' ' -f$$n); \
+	printf "%s > \033[33m%s\033[0m accomplished\n" "$$icon" "$(@)"; \
+	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; tput sgr0;
 endef
 
 define say
@@ -15,9 +13,13 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log
+.PHONY: step loop log sparkle
 
 all: loop
+	$(call success)
+	
+sparkle: clean
+	rm -f thinking.txt decision.txt prompt.txt
 	$(call success)
 
 log:
@@ -36,7 +38,7 @@ loop: decision.txt
 		echo "Done marker found. Loop completed."; \
 	else \
 		cat decision.txt; \
-		read -p "Authorise? [y/N] " answer; \
+		answer=$$(. venv/bin/activate && python -c "import say; print(say.ask_authorization('Continue with this decision?'))"); \
 		if [ "$${answer}" = "y" ]; then \
 			$(MAKE) loop; \
 		fi; \
@@ -73,7 +75,7 @@ action.txt: venv decision.txt
 		echo "$$user_response" > action.txt; \
 	else \
 		. venv/bin/activate && \
-		python mcp_client.py decision.txt > action.txt; \
+		python mcp_server.py decision.txt action.txt; \
 	fi
 	$(call success)
 
