@@ -67,12 +67,21 @@ decision.txt: venv thinking.txt
 	cat thinking.txt | python parse.py decision.txt
 	$(call success)
 
+
+.PHONY: decide
+decide:
+	git add .
+	git commit -F decision.txt
+	$(call success)
+
 action.txt: venv decision.txt
 	@if grep -q "ask_handler" decision.txt; then \
 		prompt=$$(cat decision.txt | grep -o '"prompt":"[^"]*"' | cut -d'"' -f4); \
 		echo "$$prompt"; \
 		read -p "> " user_response; \
 		echo "$$user_response" > action.txt; \
+		if [ "$$user_response" = "commit" ] || [ "$$user_response" = "git commit" ]; then \
+		fi; \
 	else \
 		. venv/bin/activate && \
 		python mcp_server.py decision.txt action.txt; \
