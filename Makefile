@@ -13,7 +13,7 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log sparkle
+.PHONY: step loop log sparkle fix
 
 all: loop
 	$(call success)
@@ -33,15 +33,11 @@ step: action.txt
 	rm -f action.txt thinking.txt prompt.txt
 	$(call success)
 	
-loop: decision.txt
+loop: action.txt
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
-		cat decision.txt; \
-		answer=$$(. venv/bin/activate && python -c "import say; print(say.ask_authorization('Continue with this decision?'))"); \
-		if [ "$${answer}" = "y" ]; then \
-			$(MAKE) loop; \
-		fi; \
+        $(MAKE) loop; \
 	fi
 	$(call success)
 
@@ -78,8 +74,6 @@ action.txt: venv decision.txt
 		echo "$$prompt"; \
 		read -p "> " user_response; \
 		echo "$$user_response" > action.txt; \
-		if [ "$$user_response" = "commit" ] || [ "$$user_response" = "git commit" ]; then \
-		fi; \
 	else \
 		. venv/bin/activate && \
 		python mcp_server.py decision.txt action.txt; \
@@ -94,6 +88,10 @@ venv: requirements.txt
 	python3 -m venv venv
 	. venv/bin/activate && \
 	pip install -r requirements.txt
+	$(call success)
+
+fix:
+	claude "run makefile and fix"
 	$(call success)
 
 clean: sparkle
