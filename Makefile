@@ -71,7 +71,7 @@ decision.txt: venv thinking.txt
 .PHONY: decide
 decide:
 	git add .
-	git commit -F decision.txt
+	git commit -t decision.txt
 	$(call success)
 
 action.txt: venv decision.txt
