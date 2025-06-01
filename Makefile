@@ -34,7 +34,7 @@ loop: action.txt
 		echo "Done marker found. Loop completed."; \
 	else \
         rm -f action.txt thinking.txt prompt.txt \
-        $(MAKE); \
+        $(MAKE) loop; \
 	fi
 	$(call success)
 
