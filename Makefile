@@ -18,7 +18,7 @@ endef
 all: loop
 	$(call success)
 	
-sparkle: clean
+sparkle:
 	rm -f thinking.txt decision.txt prompt.txt
 	$(call success)
 
@@ -65,13 +65,11 @@ thinking.txt: api.key task.txt venv prompt.txt
 decision.txt: venv thinking.txt
 	. venv/bin/activate && \
 	cat thinking.txt | python parse.py decision.txt
-	$(call success)
-
-
-.PHONY: decide
-decide:
 	git add .
-	git commit -t decision.txt
+	if ! git commit -t decision.txt; then \
+		rm -f decision.txt; \
+		exit 1; \
+	fi
 	$(call success)
 
 action.txt: venv decision.txt
@@ -98,7 +96,7 @@ venv: requirements.txt
 	pip install -r requirements.txt
 	$(call success)
 
-clean:
+clean: sparkle
 	rm -Rf venv
 	$(call success)
 
