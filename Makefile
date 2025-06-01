@@ -76,7 +76,7 @@ action.txt: venv decision.txt
 		echo "$$user_response" > action.txt; \
 	else \
 		. venv/bin/activate && \
-		python mcp_server.py decision.txt action.txt; \
+		python execute_decision.py decision.txt action.txt; \
 	fi
 	$(call success)
 
