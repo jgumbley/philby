@@ -29,15 +29,12 @@ log:
 api.key:
 	$(error 'error missing api.key')
 
-step: action.txt
-	rm -f action.txt thinking.txt prompt.txt
-	$(call success)
-	
 loop: action.txt
 	@if [ -f done.txt ]; then \
 		echo "Done marker found. Loop completed."; \
 	else \
-        $(MAKE) loop; \
+        rm -f action.txt thinking.txt prompt.txt \
+        $(MAKE); \
 	fi
 	$(call success)
 

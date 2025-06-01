@@ -2,7 +2,6 @@
 import json
 import sys
 import os
-from decision_schema import Decision
 
 try:
     if len(sys.argv) < 3:
@@ -16,15 +15,13 @@ try:
     with open(decision_file, 'r') as f:
         decision_data = json.loads(f.read().strip())
     
-    # Parse the decision
-    decision = Decision(**decision_data)
-    
     # Execute the decision
     result = ""
     
-    if decision.tool_call:
-        tool_name = decision.tool_call.name
-        tool_args = decision.tool_call.args
+    # Handle the current decision format
+    if decision_data.get("decision_type") == "Tool Call":
+        tool_name = decision_data.get("tool_name")
+        tool_args = decision_data.get("tool_arguments", {})
         
         if tool_name == "read_file":
             file_path = tool_args.get("file_path", "")
@@ -48,8 +45,8 @@ try:
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
     
-    elif decision.ask_handler:
-        prompt = decision.ask_handler.prompt
+    elif decision_data.get("decision_type") == "Ask Handler":
+        prompt = decision_data.get("prompt", "")
         result = f"Prompt: {prompt}"
     
     else:
