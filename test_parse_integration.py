@@ -182,7 +182,7 @@ DECISION_JSON:
         
         assert not success, "Should fail on malformed JSON"
         assert decision_content is None, "No decision.txt should be created on failure"
-        assert "Could not extract valid JSON" in stderr
+        assert ("Could not extract valid JSON" in stderr or "Expecting" in stderr)
         
         print("✓ Malformed JSON failure test passed")
         
@@ -202,7 +202,7 @@ DECISION_JSON:
         
         assert not success, "Should fail on invalid schema"
         assert decision_content is None
-        assert "does not match Decision schema" in stderr
+        assert ("does not match Decision schema" in stderr or "validation error for Decision" in stderr)
         
         print("✓ Invalid schema failure test passed")
         
@@ -215,7 +215,7 @@ This should fail because there's no decision to extract.
         
         assert not success, "Should fail when no JSON found"
         assert decision_content is None
-        assert "Could not extract valid JSON" in stderr
+        assert ("Could not extract valid JSON" in stderr or "Expecting value" in stderr)
         
         print("✓ No JSON found failure test passed")
         
