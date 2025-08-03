@@ -13,7 +13,7 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log sparkle fix digest ingest
+.PHONY: step loop log sparkle fix digest ingest test test-dspy
 
 all: loop
 	$(call success)
@@ -102,6 +102,16 @@ digest:
 
 ingest:
 	$(MAKE) digest | wl-copy
+	$(call success)
+
+test: venv
+	. venv/bin/activate && \
+	python test_parse_integration.py
+	$(call success)
+
+test-dspy: venv
+	. venv/bin/activate && \
+	python test_parse_integration.py --dspy-version
 	$(call success)
 
 clean: sparkle
