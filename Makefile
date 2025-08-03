@@ -13,7 +13,7 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log sparkle fix
+.PHONY: step loop log sparkle fix digest ingest
 
 all: loop
 	$(call success)
@@ -89,6 +89,19 @@ venv: requirements.txt
 
 fix:
 	claude "run makefile and fix"
+	$(call success)
+
+digest:
+	@echo "=== Project Digest ==="
+	@for file in $$(find . -type f -name "*.py" -o -name "*.md" -o -name "*.txt" -o -name "Makefile" | grep -v venv | grep -v __pycache__ | sort); do \
+		echo ""; \
+		echo "--- $$file ---"; \
+		cat "$$file"; \
+	done
+	$(call success)
+
+ingest:
+	$(MAKE) digest | wl-copy
 	$(call success)
 
 clean: sparkle
