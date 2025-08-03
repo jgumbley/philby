@@ -68,7 +68,7 @@ def main():
         decision = Decision(**json_data)
         
         # Use the validated JSON string for saving
-        validated_json_str = json_str
+        validated_json_str = decision.model_dump_json(indent=2)
             
     except json.JSONDecodeError:
         print("Error: Could not extract valid JSON from input", file=sys.stderr)
