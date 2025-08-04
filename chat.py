@@ -34,27 +34,27 @@ def list_todos() -> str:
 
 def execute_tool(response: str) -> str:
     """Extract and execute tool calls from response"""
-    # Look for JSON in the response
-    json_match = re.search(r'\{.*?"name".*?\}', response)
-    print(f"[DEBUG] JSON match: {json_match}")
-    if not json_match:
-        return ""
+    response = response.strip()
     
-    try:
-        tool_data = json.loads(json_match.group())
-        print(f"[DEBUG] Parsed tool data: {tool_data}")
-        tool_name = tool_data.get("name", "")
-        args = tool_data.get("arguments", {})
-        
-        if tool_name == "add_todo":
-            return add_todo(args.get("item", ""))
-        elif tool_name == "list_todos":
-            return list_todos()
-        else:
-            return f"Unknown tool: {tool_name}"
-    except Exception as e:
-        print(f"[DEBUG] Tool execution error: {e}")
-        return ""
+    # If response looks like JSON, try to parse it directly
+    if response.startswith('{') and response.endswith('}'):
+        try:
+            tool_data = json.loads(response)
+            print(f"[DEBUG] Parsed tool data: {tool_data}")
+            
+            tool_name = tool_data.get("name", "")
+            args = tool_data.get("arguments", {})
+            
+            if tool_name == "add_todo":
+                return add_todo(args.get("item", ""))
+            elif tool_name == "list_todos":
+                return list_todos()
+            else:
+                return f"Unknown tool: {tool_name}"
+        except Exception as e:
+            print(f"[DEBUG] Tool execution error: {e}")
+    
+    return ""
 
 
 def setup_dspy():
