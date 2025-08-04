@@ -9,13 +9,13 @@ define success
 endef
 
 define say
-	. venv/bin/activate && \
+	. ..venv/bin/activate && \
 		python say.py "$$(cat $(1))"
 endef
 
 .PHONY: step loop log sparkle fix digest ingest system
 
-all: loop
+all: chat
 	$(call success)
 	
 sparkle:
@@ -24,7 +24,7 @@ sparkle:
 	$(call success)
 
 log:
-	. venv/bin/activate && llm logs
+	. .venv/bin/activate && llm logs
 	$(call success)
 
 api.key:
@@ -49,15 +49,15 @@ prompt.txt:
 	cat README.md task.txt > prompt.txt
 	$(call success)
 
-thinking.txt: api.key task.txt venv prompt.txt
+thinking.txt: api.key task.txt .venv/ prompt.txt
 	$(call say,task.txt)
-	. venv/bin/activate && \
+	. ..venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api.key) && \
 	cat prompt.txt | llm prompt -c -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
-decision.txt: venv thinking.txt
-	. venv/bin/activate && \
+decision.txt: .venv/ thinking.txt
+	. ..venv/bin/activate && \
 	cat thinking.txt | python parse.py decision.txt
 	git add .
 	if ! git commit -t decision.txt; then \
@@ -66,14 +66,14 @@ decision.txt: venv thinking.txt
 	fi
 	$(call success)
 
-action.txt: venv decision.txt
+action.txt: .venv/ decision.txt
 	@if grep -q "ask_handler" decision.txt; then \
 		prompt=$$(cat decision.txt | grep -o '"prompt":"[^"]*"' | cut -d'"' -f4); \
 		echo "$$prompt"; \
 		read -p "> " user_response; \
 		echo "$$user_response" > action.txt; \
 	else \
-		. venv/bin/activate && \
+		. ..venv/bin/activate && \
 		python execute_decision.py decision.txt action.txt; \
 	fi
 	$(call success)
@@ -82,7 +82,7 @@ new:
 	rm -f task.txt
 	$(call success)
 
-venv/: requirements.txt
+..venv/: requirements.txt
 	uv venv
 	uv pip install -r requirements.txt
 	$(call success)
@@ -104,11 +104,11 @@ ingest:
 	$(MAKE) digest | wl-copy
 	$(call success)
 
-system: venv
+system: .venv/
 	uv run python system.py
 	$(call success)
 
-chat: venv
+chat: .venv/
 	uv run python chat.py
 	$(call success)
 

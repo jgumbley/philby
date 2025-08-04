@@ -5,6 +5,7 @@ Minimal chat interface with todo tools.
 import os
 import json
 import re
+import random
 import dspy
 
 
@@ -176,16 +177,17 @@ def main():
     """Main chat loop"""
     setup_dspy()
     
-    print("🤖 Simple Chat")
-    print("Type /quit to exit")
+    # Random philby icon selection like in Makefile
+    icons = ["🕵️", "🔒", "📡", "🗝️", "🥃"]
+    icon = random.choice(icons)
+    
+    print(f"{icon} Philby Chat")
+    print("Press Ctrl-C to exit")
     print("-" * 30)
     
     while True:
         try:
             user_input = input("\nYou: ").strip()
-            
-            if user_input == "/quit":
-                break
             if user_input == "/todos":
                 print("Assistant:", list_todos())
                 continue
