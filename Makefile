@@ -13,7 +13,7 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log sparkle fix digest ingest system
+.PHONY: step log sparkle fix digest ingest system
 
 all: chat
 	$(call success)
@@ -29,25 +29,6 @@ log:
 
 api.key:
 	$(error 'error missing api.key')
-
-loop: action.txt
-	@if [ -f done.txt ]; then \
-		echo "Done marker found. Loop completed."; \
-	else \
-        rm -f action.txt thinking.txt prompt.txt \
-        $(MAKE) loop; \
-	fi
-	$(call success)
-
-task.txt:
-	@read -p "Enter your task: " user_input && \
-	echo "---This is your task---" >> task.txt && \
-	echo "$$user_input" >> task.txt
-	$(call success)
-
-prompt.txt:
-	cat README.md task.txt > prompt.txt
-	$(call success)
 
 thinking.txt: api.key task.txt .venv/ prompt.txt
 	$(call say,task.txt)
@@ -76,10 +57,6 @@ action.txt: .venv/ decision.txt
 		. ..venv/bin/activate && \
 		python execute_decision.py decision.txt action.txt; \
 	fi
-	$(call success)
-
-new:
-	rm -f task.txt
 	$(call success)
 
 ..venv/: requirements.txt
