@@ -3,13 +3,29 @@
 import dspy
 import os
 
+class PhilbySignature(dspy.Signature):
+    """Given a task and context, reason step-by-step, predict outcomes, and decide on an action."""
+    
+    # Inputs
+    task = dspy.InputField(desc="The current task to accomplish")
+    context = dspy.InputField(desc="Previous thinking, actions, and results")
+    available_tools = dspy.InputField(desc="List of tool names and their descriptions")
+    
+    # Reasoning outputs
+    reasoning = dspy.OutputField(desc="Step-by-step thinking about the task")
+    information_needed = dspy.OutputField(desc="What information would help (file paths, context)", default="none")
+    
+    # Philby core outputs
+    predictions = dspy.OutputField(desc="Specific predictions about what will happen")
+    decision = dspy.OutputField(desc="JSON object with tool_call or ask_handler", format=dict)
+
 def main():
     # Configure DSPy with local OpenAI-compatible model
     lm = dspy.LM(
         model="openai/qwen3-30b-a3b-instruct-2507/model.gguf",
         api_base="http://hal:8080/v1",
         api_key="123",
-        max_tokens=100,
+        max_tokens=16384,
         timeout=10,
         connect_timeout=1
     )

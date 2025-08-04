@@ -93,6 +93,21 @@ def make_clean() -> str:
     return run_make_target("clean")
 
 
+def list_files(path: str = ".") -> str:
+    """List files in directory"""
+    import subprocess
+    try:
+        result = subprocess.run(['ls', '-la', path], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return f"Files in {path}:\n{result.stdout}"
+        else:
+            return f"Error listing files in {path}: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return f"Timeout listing files in {path}"
+    except Exception as e:
+        return f"Failed to list files in {path}: {str(e)}"
+
+
 def execute_tool(response: str) -> str:
     """Extract and execute tool calls from response"""
     response = response.strip()
@@ -128,6 +143,8 @@ def execute_tool(response: str) -> str:
                 return make_system()
             elif tool_name == "make_clean":
                 return make_clean()
+            elif tool_name == "list_files":
+                return list_files(args.get("path", "."))
             else:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
@@ -187,7 +204,9 @@ def main():
     
     while True:
         try:
-            user_input = input("\nYou: ").strip()
+            # Random emoji for each user input
+            user_emoji = random.choice(icons)
+            user_input = input(f"\n{user_emoji} > ").strip()
             if user_input == "/todos":
                 print("Assistant:", list_todos())
                 continue

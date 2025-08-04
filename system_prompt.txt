@@ -34,6 +34,9 @@ AVAILABLE TOOLS:
 11. make_clean - Remove venv and cache
     Usage: {"name": "make_clean", "arguments": {}}
 
+12. list_files - List files in directory
+    Usage: {"name": "list_files", "arguments": {"path": "directory_path"}}
+
 INSTRUCTIONS:
 - When the user wants to add something to their todo list, respond with the add_todo tool JSON
 - When the user wants to see their todo list, respond with the list_todos tool JSON
