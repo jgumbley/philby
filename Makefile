@@ -13,13 +13,14 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log sparkle fix digest ingest test test-dspy
+.PHONY: step loop log sparkle fix digest ingest system
 
 all: loop
 	$(call success)
 	
 sparkle:
 	rm -f thinking.txt decision.txt prompt.txt
+	rm -rf ~/.dspy_cache
 	$(call success)
 
 log:
@@ -81,10 +82,9 @@ new:
 	rm -f task.txt
 	$(call success)
 
-venv: requirements.txt
-	python3 -m venv venv
-	. venv/bin/activate && \
-	pip install -r requirements.txt
+venv/: requirements.txt
+	uv venv
+	uv pip install -r requirements.txt
 	$(call success)
 
 fix:
@@ -104,14 +104,8 @@ ingest:
 	$(MAKE) digest | wl-copy
 	$(call success)
 
-test: venv
-	. venv/bin/activate && \
-	python test_parse_integration.py
-	$(call success)
-
-test-dspy: venv
-	. venv/bin/activate && \
-	python test_parse_integration.py --dspy-version
+system: venv
+	uv run python system.py
 	$(call success)
 
 clean: sparkle
