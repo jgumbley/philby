@@ -9,24 +9,39 @@ def main():
         model="openai/qwen3-30b-a3b-instruct-2507/model.gguf",
         api_base="http://hal:8080/v1",
         api_key="123",
-        max_tokens=100
+        max_tokens=100,
+        timeout=10,
+        connect_timeout=1
     )
     
     # Set as default language model
     dspy.configure(lm=lm)
     
-    # Create a simple signature for hello world
-    class HelloWorld(dspy.Signature):
-        """Generate a hello world message"""
-        message: str = dspy.OutputField(desc="A friendly hello world message")
+    # Create a signature for fibonacci code generation
+    class FibonacciGenerator(dspy.Signature):
+        """Generate a Python script that calculates fibonacci numbers with optimizations"""
+        requirements: str = dspy.InputField(desc="Requirements for the fibonacci implementation")
+        code: str = dspy.OutputField(desc="Complete Python script with fibonacci implementation")
+        explanation: str = dspy.OutputField(desc="Explanation of the algorithm and optimizations used")
     
     # Create a predictor
-    hello_predictor = dspy.Predict(HelloWorld)
+    fib_predictor = dspy.Predict(FibonacciGenerator)
     
     try:
-        # Generate hello world message
-        result = hello_predictor()
-        print(f"DSPy Hello World: {result.message}")
+        # Generate fibonacci implementation
+        requirements = """Create a Python script that:
+1. Implements fibonacci calculation with memoization for efficiency
+2. Includes both recursive and iterative approaches
+3. Has error handling for invalid inputs
+4. Includes timing comparisons between approaches
+5. Has a command-line interface to specify which fibonacci number to calculate
+6. Includes docstrings and type hints"""
+        
+        result = fib_predictor(requirements=requirements)
+        print("=== Generated Fibonacci Code ===")
+        print(result.code)
+        print("\n=== Explanation ===")
+        print(result.explanation)
     except Exception as e:
         print(f"Error calling local model: {e}")
         print("Make sure your local OpenAI-compatible server is running on http://hal:8080")
