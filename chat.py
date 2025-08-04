@@ -32,6 +32,66 @@ def list_todos() -> str:
     return result.strip()
 
 
+def run_make_target(target: str) -> str:
+    """Run a Makefile target"""
+    import subprocess
+    try:
+        result = subprocess.run(['make', target], capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return f"Successfully ran 'make {target}'\nOutput: {result.stdout}"
+        else:
+            return f"Error running 'make {target}'\nError: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return f"Timeout running 'make {target}'"
+    except Exception as e:
+        return f"Failed to run 'make {target}': {str(e)}"
+
+
+def make_sparkle() -> str:
+    """Clean cache files"""
+    return run_make_target("sparkle")
+
+
+def make_log() -> str:
+    """Show llm logs"""
+    return run_make_target("log")
+
+
+def make_loop() -> str:
+    """Run main processing loop"""
+    return run_make_target("loop")
+
+
+def make_new() -> str:
+    """Clean task.txt for new task"""
+    return run_make_target("new")
+
+
+def make_fix() -> str:
+    """Run claude to fix makefile issues"""
+    return run_make_target("fix")
+
+
+def make_digest() -> str:
+    """Show project file contents"""
+    return run_make_target("digest")
+
+
+def make_ingest() -> str:
+    """Copy digest to clipboard"""
+    return run_make_target("ingest")
+
+
+def make_system() -> str:
+    """Run system.py"""
+    return run_make_target("system")
+
+
+def make_clean() -> str:
+    """Remove venv and cache"""
+    return run_make_target("clean")
+
+
 def execute_tool(response: str) -> str:
     """Extract and execute tool calls from response"""
     response = response.strip()
@@ -49,6 +109,24 @@ def execute_tool(response: str) -> str:
                 return add_todo(args.get("item", ""))
             elif tool_name == "list_todos":
                 return list_todos()
+            elif tool_name == "make_sparkle":
+                return make_sparkle()
+            elif tool_name == "make_log":
+                return make_log()
+            elif tool_name == "make_loop":
+                return make_loop()
+            elif tool_name == "make_new":
+                return make_new()
+            elif tool_name == "make_fix":
+                return make_fix()
+            elif tool_name == "make_digest":
+                return make_digest()
+            elif tool_name == "make_ingest":
+                return make_ingest()
+            elif tool_name == "make_system":
+                return make_system()
+            elif tool_name == "make_clean":
+                return make_clean()
             else:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
