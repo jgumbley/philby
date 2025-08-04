@@ -108,6 +108,10 @@ system: venv
 	uv run python system.py
 	$(call success)
 
+chat: venv
+	uv run python chat.py
+	$(call success)
+
 clean: sparkle
 	rm -Rf venv
 	$(call success)
