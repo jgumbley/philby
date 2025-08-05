@@ -13,6 +13,9 @@ define say
 		python say.py "$$(cat $(1))"
 endef
 
+# Environment variables
+export PHILBY_API_BASE ?= http://hal:27000/v1
+
 .PHONY: step log sparkle fix digest ingest system
 
 all: chat

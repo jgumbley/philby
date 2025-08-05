@@ -156,8 +156,8 @@ def execute_tool(response: str) -> str:
 def setup_dspy():
     """Setup DSPy"""
     lm = dspy.LM(
-        model="openai/qwen3-30b-a3b-instruct-2507/model.gguf",
-        api_base="http://hal:8080/v1",
+        model="openai/llama",
+        api_base=os.getenv("PHILBY_API_BASE"),
         api_key="123",
         max_tokens=200,
         timeout=10

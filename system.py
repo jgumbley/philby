@@ -23,7 +23,7 @@ def main():
     # Configure DSPy with local OpenAI-compatible model
     lm = dspy.LM(
         model="openai/qwen3-30b-a3b-instruct-2507/model.gguf",
-        api_base="http://hal:8080/v1",
+        api_base=os.getenv("PHILBY_API_BASE"),
         api_key="123",
         max_tokens=16384,
         timeout=10,
@@ -60,7 +60,8 @@ def main():
         print(result.explanation)
     except Exception as e:
         print(f"Error calling local model: {e}")
-        print("Make sure your local OpenAI-compatible server is running on http://hal:8080")
+        api_base = os.getenv("PHILBY_API_BASE")
+        print(f"Make sure your local OpenAI-compatible server is running on {api_base}")
 
 if __name__ == "__main__":
     main()
