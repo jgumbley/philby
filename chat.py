@@ -174,12 +174,30 @@ def load_system_prompt() -> str:
         return "You are a helpful assistant with todo tools."
 
 
-def chat_with_llm(message: str) -> str:
-    """Simple LLM call"""
+def chat_with_llm(message: str, conversation_history: list = None) -> str:
+    """LLM call with ChatML format and conversation history"""
     system_prompt = load_system_prompt()
     
-    # Simple prompt format
-    prompt = f"System: {system_prompt}\n\nUser: {message}\n\nAssistant:"
+    if conversation_history is None:
+        conversation_history = []
+    
+    # Build ChatML format messages
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(conversation_history)
+    messages.append({"role": "user", "content": message})
+    
+    # Convert to simple prompt format for current LM
+    prompt_parts = []
+    for msg in messages:
+        if msg["role"] == "system":
+            prompt_parts.append(f"<|im_start|>system\n{msg['content']}<|im_end|>")
+        elif msg["role"] == "user":
+            prompt_parts.append(f"<|im_start|>user\n{msg['content']}<|im_end|>")
+        elif msg["role"] == "assistant":
+            prompt_parts.append(f"<|im_start|>assistant\n{msg['content']}<|im_end|>")
+    
+    prompt_parts.append("<|im_start|>assistant\n")
+    prompt = "\n".join(prompt_parts)
     
     # Direct LLM call
     response = dspy.settings.lm(prompt)
@@ -243,6 +261,9 @@ def main():
     print("Press Ctrl-C to exit")
     print("-" * 30)
     
+    # Maintain conversation history
+    conversation_history = []
+    
     while True:
         try:
             # Random emoji for each user input
@@ -252,15 +273,20 @@ def main():
                 print(purple_dream_bubble(list_todos()))
                 continue
             
-            # Get LLM response
-            response = chat_with_llm(user_input)
+            # Get LLM response with conversation history
+            response = chat_with_llm(user_input, conversation_history)
             
             # Try to execute any tools
             tool_result = execute_tool(response)
             
+            # Update conversation history
+            conversation_history.append({"role": "user", "content": user_input})
+            
             if tool_result:
+                conversation_history.append({"role": "assistant", "content": tool_result})
                 print(purple_dream_bubble(tool_result))
             else:
+                conversation_history.append({"role": "assistant", "content": response})
                 print(purple_dream_bubble(response))
                 
         except KeyboardInterrupt:
