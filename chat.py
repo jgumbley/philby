@@ -190,6 +190,47 @@ def chat_with_llm(message: str) -> str:
     return str(response)
 
 
+def purple_dream_bubble(text: str) -> str:
+    """Create a clean purple speech bubble"""
+    import re
+    import textwrap
+    
+    # Purple/magenta ANSI color codes
+    BRIGHT_PURPLE = '\033[35m'
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    
+    # Function to strip ANSI codes for length calculation
+    def strip_ansi(text):
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', text)
+    
+    # Wrap text to reasonable width (80 chars max)
+    wrapped_lines = []
+    for line in text.split('\n'):
+        if len(strip_ansi(line)) > 80:
+            wrapped_lines.extend(textwrap.wrap(line, width=80, break_long_words=False, break_on_hyphens=False))
+        else:
+            wrapped_lines.append(line)
+    
+    # Create bubble border
+    max_len = max(len(strip_ansi(line)) for line in wrapped_lines) if wrapped_lines else 0
+    
+    # Top border
+    bubble = f"{BRIGHT_PURPLE}╭{'─' * (max_len + 2)}╮{RESET}\n"
+    
+    # Content lines
+    for line in wrapped_lines:
+        visible_len = len(strip_ansi(line))
+        padding = ' ' * (max_len - visible_len)
+        bubble += f"{BRIGHT_PURPLE}│ {BOLD}{line}{RESET}{BRIGHT_PURPLE}{padding} │{RESET}\n"
+    
+    # Bottom border
+    bubble += f"{BRIGHT_PURPLE}╰{'─' * (max_len + 2)}╯{RESET}"
+    
+    return bubble
+
+
 def main():
     """Main chat loop"""
     setup_dspy()
@@ -208,22 +249,19 @@ def main():
             user_emoji = random.choice(icons)
             user_input = input(f"\n{user_emoji} > ").strip()
             if user_input == "/todos":
-                print("Assistant:", list_todos())
+                print(purple_dream_bubble(list_todos()))
                 continue
             
             # Get LLM response
             response = chat_with_llm(user_input)
             
-            # Show raw response
-            print(f"[RAW LLM RESPONSE]: {repr(response)}")
-            
             # Try to execute any tools
             tool_result = execute_tool(response)
             
             if tool_result:
-                print("Assistant:", tool_result)
+                print(purple_dream_bubble(tool_result))
             else:
-                print("Assistant:", response)
+                print(purple_dream_bubble(response))
                 
         except KeyboardInterrupt:
             break
