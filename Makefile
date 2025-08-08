@@ -88,6 +88,10 @@ system: .venv/
 	uv run python system.py
 	$(call success)
 
+tools:
+	uv run python -c "from tools import make_wiretaps; print(make_wiretaps())"
+	$(call success)
+
 chat: .venv/
 	uv run python chat.py
 	$(call success)
