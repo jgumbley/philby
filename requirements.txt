@@ -3,3 +3,4 @@ llm-gemini
 python-cowsay
 fastmcp
 files-to-prompt
+dspy-ai

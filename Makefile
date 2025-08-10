@@ -9,87 +9,94 @@ define success
 endef
 
 define say
-	. venv/bin/activate && \
+	. ..venv/bin/activate && \
 		python say.py "$$(cat $(1))"
 endef
 
-.PHONY: step loop log sparkle
+# Environment variables
+export PHILBY_API_BASE ?= http://hal:27000/v1
 
-all: loop
+.PHONY: step log sparkle fix digest ingest system
+
+all: chat
 	$(call success)
 	
-sparkle: clean
+sparkle:
 	rm -f thinking.txt decision.txt prompt.txt
+	rm -rf ~/.dspy_cache
 	$(call success)
 
 log:
-	. venv/bin/activate && llm logs
+	. .venv/bin/activate && llm logs
 	$(call success)
 
 api.key:
 	$(error 'error missing api.key')
 
-step: action.txt
-	rm -f action.txt thinking.txt prompt.txt
-	$(call success)
-	
-loop: decision.txt
-	@if [ -f done.txt ]; then \
-		echo "Done marker found. Loop completed."; \
-	else \
-		cat decision.txt; \
-		answer=$$(. venv/bin/activate && python -c "import say; print(say.ask_authorization('Continue with this decision?'))"); \
-		if [ "$${answer}" = "y" ]; then \
-			$(MAKE) loop; \
-		fi; \
-	fi
-	$(call success)
-
-task.txt:
-	@read -p "Enter your task: " user_input && \
-	echo "---This is your task---" >> task.txt && \
-	echo "$$user_input" >> task.txt
-	$(call success)
-
-prompt.txt:
-	cat README.md task.txt > prompt.txt
-	$(call success)
-
-thinking.txt: api.key task.txt venv prompt.txt
+thinking.txt: api.key task.txt .venv/ prompt.txt
 	$(call say,task.txt)
-	. venv/bin/activate && \
+	. ..venv/bin/activate && \
 	export LLM_GEMINI_KEY=$$(cat api.key) && \
 	cat prompt.txt | llm prompt -c -m "gemini-2.5-pro-preview-03-25" | python gather.py thinking.txt
 	$(call success)
 
-decision.txt: venv thinking.txt
-	. venv/bin/activate && \
+decision.txt: .venv/ thinking.txt
+	. ..venv/bin/activate && \
 	cat thinking.txt | python parse.py decision.txt
+	git add .
+	if ! git commit -t decision.txt; then \
+		rm -f decision.txt; \
+		exit 1; \
+	fi
 	$(call success)
 
-action.txt: venv decision.txt
+action.txt: .venv/ decision.txt
 	@if grep -q "ask_handler" decision.txt; then \
 		prompt=$$(cat decision.txt | grep -o '"prompt":"[^"]*"' | cut -d'"' -f4); \
 		echo "$$prompt"; \
 		read -p "> " user_response; \
 		echo "$$user_response" > action.txt; \
 	else \
-		. venv/bin/activate && \
-		python mcp_server.py decision.txt action.txt; \
+		. ..venv/bin/activate && \
+		python execute_decision.py decision.txt action.txt; \
 	fi
 	$(call success)
 
-new:
-	rm -f task.txt
+..venv/: requirements.txt
+	uv venv
+	uv pip install -r requirements.txt
 	$(call success)
 
-venv: requirements.txt
-	python3 -m venv venv
-	. venv/bin/activate && \
-	pip install -r requirements.txt
+fix:
+	claude "run makefile and fix"
 	$(call success)
 
-clean:
+digest:
+	@echo "=== Project Digest ==="
+	@for file in $$(find . -type f -name "*.py" -o -name "*.md" -o -name "*.txt" -o -name "Makefile" | grep -v venv | grep -v __pycache__ | sort); do \
+		echo ""; \
+		echo "--- $$file ---"; \
+		cat "$$file"; \
+	done
+	$(call success)
+
+ingest:
+	$(MAKE) digest | wl-copy
+	$(call success)
+
+system: .venv/
+	uv run python system.py
+	$(call success)
+
+tools:
+	uv run python -c "from tools import make_wiretaps; print(make_wiretaps())"
+	$(call success)
+
+chat: .venv/
+	uv run python chat.py
+	$(call success)
+
+clean: sparkle
 	rm -Rf venv
 	$(call success)
 
