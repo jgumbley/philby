@@ -165,7 +165,7 @@ def build_initial_context() -> list:
     # Pre-built conversation showing the approval pattern
     purpose_message = {
         "role": "assistant", 
-        "content": "My purpose is to check the latest wiretap in case it's suspicious"
+        "content": "My purpose is to find the suspicious wiretap and report its identifier"
     }
     
     approval_message = {
@@ -196,8 +196,15 @@ def main():
     tool_result = execute_tool(response)
     if tool_result:
         print(purple_dream_bubble(tool_result))
+        # Add tool result to conversation history so LLM can continue processing
+        conversation_history.append({"role": "assistant", "content": tool_result})
+        # Send tool result to LLM immediately for follow-up processing
+        followup_response = chat_with_llm("", conversation_history)
+        print(purple_dream_bubble(followup_response))
+        conversation_history.append({"role": "assistant", "content": followup_response})
     else:
         print(purple_dream_bubble(response))
+        conversation_history.append({"role": "assistant", "content": response})
     
     while True:
         try:

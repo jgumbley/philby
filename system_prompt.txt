@@ -18,6 +18,9 @@ AVAILABLE TOOLS:
 3. make_wiretaps - Execute 'make wiretaps' in ../kong/ directory and return results
    Usage: {"name": "make_wiretaps", "arguments": {}}
 
+4. make_wiretap - Analyze specific wiretap by ID
+   Usage: {"name": "make_wiretap", "arguments": {"wiretap_id": "unique_identifier"}}
+
 OPERATIONAL GUIDELINES:
 - Prioritize user alignment above all other considerations
 - Before sensitive operations, ask questions and seek consent

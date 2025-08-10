@@ -7,6 +7,34 @@ import json
 import subprocess
 
 
+def _call_make(target: str, extra_args: list = None) -> str:
+    """Prototype make caller for kong operations"""
+    try:
+        # Create a copy of current environment
+        env = os.environ.copy()
+        # Remove any virtual env variables that might interfere
+        env.pop('VIRTUAL_ENV', None)
+        env.pop('CONDA_DEFAULT_ENV', None)
+        
+        # Build command
+        cmd = ['make', '-C', '../kong', target]
+        if extra_args:
+            cmd.extend(extra_args)
+        
+        # Execute with clean environment
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0:
+            return f"Make {target} complete:\n{result.stdout}"
+        else:
+            return f"Make {target} failed (code {result.returncode}):\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+            
+    except subprocess.TimeoutExpired:
+        return f"Make {target} timed out"
+    except Exception as e:
+        return f"Failed to run make {target}: {str(e)}"
+
+
 def add_todo(item: str) -> str:
     """Add item to todo list"""
     with open("todo.txt", 'a') as f:
@@ -32,26 +60,16 @@ def list_todos() -> str:
 
 
 def make_wiretaps() -> str:
-    """Analyze data for suspicious patterns"""
-    try:
-        import os
-        # Create a copy of current environment
-        env = os.environ.copy()
-        # Remove any virtual env variables that might interfere
-        env.pop('VIRTUAL_ENV', None)
-        env.pop('CONDA_DEFAULT_ENV', None)
-        
-        # Use make -C to run from the kong directory with clean environment
-        result = subprocess.run(['make', '-C', '../kong', 'wiretaps'], 
-                              env=env, capture_output=True, text=True, timeout=30)
-        if result.returncode == 0:
-            return f"Wiretap analysis complete:\n{result.stdout}"
-        else:
-            return f"Wiretap analysis failed (code {result.returncode}):\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-    except subprocess.TimeoutExpired:
-        return "Wiretap analysis timed out"
-    except Exception as e:
-        return f"Failed to run wiretap analysis: {str(e)}"
+    """Analyze data for suspicious patterns using prototype caller"""
+    return _call_make("wiretaps")
+
+
+def make_wiretap(wiretap_id: str) -> str:
+    """Analyze specific wiretap by ID using prototype caller"""
+    if not wiretap_id:
+        return "Error: wiretap_id is required"
+    
+    return _call_make("wiretap", [wiretap_id])
 
 
 def execute_tool(response: str) -> str:
@@ -73,6 +91,8 @@ def execute_tool(response: str) -> str:
                 return list_todos()
             elif tool_name == "make_wiretaps":
                 return make_wiretaps()
+            elif tool_name == "make_wiretap":
+                return make_wiretap(args.get("wiretap_id", ""))
             else:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
