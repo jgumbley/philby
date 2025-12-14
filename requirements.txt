@@ -4,3 +4,4 @@ python-cowsay
 fastmcp
 files-to-prompt
 dspy-ai
+redis
