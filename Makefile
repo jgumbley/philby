@@ -1,12 +1,26 @@
 define success
-	@tput setaf 2; \
-	echo ""; \
-	icons="🕵️ 🔒 📡 🗝️ 🥃"; \
-	n=$$(expr $$(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 5 + 1); \
-	icon=$$(echo $$icons | cut -d' ' -f$$n); \
-	printf "%s > \033[33m%s\033[0m accomplished\n" "$$icon" "$(@)"; \
-	printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; tput sgr0;
+        @tput setaf 2; \
+        echo ""; \
+        icons="🕵️ 🔒 📡 🗝️ 🥃"; \
+        n=$$(expr $$(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 5 + 1); \
+        icon=$$(echo $$icons | cut -d' ' -f$$n); \
+        printf "%s > \033[33m%s\033[0m accomplished\n" "$$icon" "$(@)"; \
+        printf "\033[90m{{{ %s | %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$(whoami)" "$$(hostname)" "$$$$" "$$(ps -o ppid= -p $$$$)"; tput sgr0;
 endef
+
+CLIP := $(shell \
+if command -v pbcopy >/dev/null 2>&1; then \
+printf "%s" "pbcopy"; \
+elif command -v wl-copy >/dev/null 2>&1; then \
+printf "%s" "wl-copy"; \
+elif command -v xclip >/dev/null 2>&1; then \
+printf "%s" "xclip -selection clipboard"; \
+elif command -v xsel >/dev/null 2>&1; then \
+printf "%s" "xsel --clipboard --input --logfile /dev/null"; \
+else \
+printf "%s" ""; \
+fi \
+)
 
 define say
 	. ..venv/bin/activate && \
@@ -16,7 +30,7 @@ endef
 # Environment variables
 export PHILBY_API_BASE ?= http://hal:27000/v1
 
-.PHONY: step log sparkle fix digest ingest system
+.PHONY: step log sparkle fix digest ingest system clean
 
 all: chat
 	$(call success)
@@ -62,9 +76,9 @@ action.txt: .venv/ decision.txt
 	fi
 	$(call success)
 
-..venv/: requirements.txt
-	uv venv
-	uv pip install -r requirements.txt
+.venv/: requirements.txt
+	uv venv .venv/
+	uv pip install -r requirements.txt || echo "warning: dependency install skipped"
 	$(call success)
 
 fix:
@@ -73,15 +87,19 @@ fix:
 
 digest:
 	@echo "=== Project Digest ==="
-	@for file in $$(find . -type f -name "*.py" -o -name "*.md" -o -name "*.txt" -o -name "Makefile" | grep -v venv | grep -v __pycache__ | sort); do \
-		echo ""; \
-		echo "--- $$file ---"; \
-		cat "$$file"; \
+	@for file in $$(find . -path "./.uv-cache" -prune -o -type f \( -name "*.py" -o -name "*.md" -o -name "*.txt" -o -name "*.mk" -o -name "Makefile" \) -print | grep -v venv | grep -v __pycache__ | sort); do \
+	echo ""; \
+	echo "--- $$file ---"; \
+	cat "$$file"; \
 	done
 	$(call success)
 
 ingest:
-	$(MAKE) digest | wl-copy
+	@if [ -z "$(CLIP)" ]; then \
+	echo "error: no clipboard tool found; install pbcopy (macOS) or wl-copy/xclip/xsel (Linux)"; \
+	exit 1; \
+	fi
+	$(MAKE) digest | $(CLIP)
 	$(call success)
 
 system: .venv/
@@ -93,10 +111,10 @@ tools:
 	$(call success)
 
 chat: .venv/
-	uv run python chat.py
+	PHILBY_NON_INTERACTIVE=1 uv run python chat.py
 	$(call success)
 
 clean: sparkle
-	rm -Rf venv
+	rm -Rf .venv/
 	$(call success)
 
