@@ -3,6 +3,7 @@ Minimal chat interface with todo tools.
 """
 
 import os
+import sys
 import json
 import re
 import random
@@ -239,5 +240,17 @@ def main():
     print("\nGoodbye!")
 
 
+def run_non_interactive_demo() -> None:
+    """Run a short, non-interactive chat demo for automation."""
+    setup_dspy()
+    conversation_history = build_initial_context()
+    response = chat_with_llm("", conversation_history)
+    print(purple_dream_bubble(response))
+
+
 if __name__ == "__main__":
+    if os.getenv("PHILBY_NON_INTERACTIVE"):
+        run_non_interactive_demo()
+        sys.exit(0)
+
     main()
