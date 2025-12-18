@@ -1,4 +1,15 @@
-.PHONY: digest ingest clean agent-%
+.PHONY: digest ingest clean agent-% update
+
+# /*
+# This is the core philby file that controls the agent interaction on behalf of the user.
+# It is interpreted when any Make command is run
+# And the AGENTS.md have been instructed to run Make
+#
+# Its important to check this file is upto date before proceeding too far, and prompt the user to do so.
+#
+# If the user prompts you, update this file using update target
+# */
+# `make update` syncs local `AGENTS.md` from https://github.com/jgumbley/philby
 
 define success
 	@printf '\033[32m\n'; \
@@ -28,6 +39,14 @@ digest:
 
 ingest:
 	$(MAKE) digest | pbcopy
+	$(call success)
+
+update:
+	@set -eu; \
+	tmp=$$(mktemp); \
+	trap 'rm -f "$$tmp"' EXIT; \
+	curl -fsSL "https://raw.githubusercontent.com/jgumbley/philby/HEAD/AGENTS.md" -o "$$tmp"; \
+	mv "$$tmp" AGENTS.md
 	$(call success)
 
 clean::

@@ -16,7 +16,7 @@ endef
 # Environment variables
 export PHILBY_API_BASE ?= http://hal:27000/v1
 
-.PHONY: step log sparkle fix digest ingest system
+.PHONY: step log sparkle fix digest ingest system update
 
 all: chat
 	$(call success)
@@ -84,6 +84,9 @@ ingest:
 	$(MAKE) digest | wl-copy
 	$(call success)
 
+update:
+	$(MAKE) -f common.mk update
+
 system: .venv/
 	uv run python system.py
 	$(call success)
@@ -99,4 +102,3 @@ chat: .venv/
 clean: sparkle
 	rm -Rf venv
 	$(call success)
-
