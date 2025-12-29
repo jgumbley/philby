@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := .venv
 
-.PHONY: .venv digest ingest clean agent-% update sync install-philby
+.PHONY: .venv digest ingest clean pane update sync install-philby
 
 ADB ?= adb
 SERIAL ?=
@@ -85,13 +85,15 @@ clean::
 	$(call success)
 
 # Run any make target inside a tmux agent pane so a human can type secrets
-# locally while the agent watches output. Usage: make agent-<target>
-agent-%:
-	@cmd_target="$*"; \
+# locally while the agent watches output. Usage: make pane target=<target>
+pane:
+	@set -eu; \
+	cmd_target="$(target)"; \
 	if [ -z "$$cmd_target" ]; then \
-		echo "Usage: make agent-<target>"; exit 1; \
-	fi; \
-	bash ./pane.sh "agent-$$cmd_target" $(MAKE) "$$cmd_target"
+		bash ./.philby/pane.sh --shell "agent-shell"; \
+	else \
+		bash ./.philby/pane.sh "agent-$$cmd_target" $(MAKE) "$$cmd_target"; \
+	fi
 
 sync:
 	@set -eu; \
