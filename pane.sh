@@ -1,13 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ $# -lt 2 ]; then
-  echo "Usage: pane.sh <pane-label> <command ...>" >&2
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  pane.sh <pane-label> <command ...>    # run a specific command in an agent pane
+  pane.sh --shell <pane-label>          # open a pane with your default shell in CWD
+EOF
   exit 1
+}
+
+use_shell=0
+if [ "${1:-}" = "--shell" ]; then
+  use_shell=1
+  shift
+fi
+
+if [ $# -lt 1 ]; then
+  usage
 fi
 
 pane_label="$1"
 shift
+
+if [ $use_shell -eq 1 ]; then
+  shell_cmd="${SHELL:-/bin/bash}"
+  set -- "$shell_cmd"
+fi
+
+if [ $# -lt 1 ]; then
+  usage
+fi
 
 cmd_display="$(printf ' %q' "$@")"
 cmd_display="${cmd_display:1}"

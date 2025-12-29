@@ -1,9 +1,12 @@
-.PHONY: digest ingest clean agent-% update sync
+.DEFAULT_GOAL := .venv
+
+.PHONY: .venv digest ingest clean agent-% update sync install-philby
 
 ADB ?= adb
 SERIAL ?=
 SRC ?= ../warez
 DEST ?=
+PHILBY_EXPORT_FILES ?= AGENTS.md CLAUDE.md
 
 # /*
 # This is the core philby file that controls the agent interaction on behalf of the user.
@@ -27,6 +30,8 @@ define success
 	printf "%s > \033[33m%s\033[0m accomplished\n" "$$icon" "$(@)"; \
 	printf "\033[90m{{{ %s | user=%s | host=%s | procid=%s | parentproc=%s }}}\033[0m\n\033[0m" "$$(date +%Y-%m-%d_%H:%M:%S)" "$$(whoami)" "$$(hostname)" "$$$$" "$$parent_info"
 endef
+
+.venv: .venv/
 
 .venv/: requirements.txt
 	uv venv .venv/
@@ -52,6 +57,27 @@ update:
 	trap 'rm -f "$$tmp"' EXIT; \
 	curl -fsSL "https://raw.githubusercontent.com/jgumbley/philby/HEAD/AGENTS.md" -o "$$tmp"; \
 	mv "$$tmp" AGENTS.md
+	$(call success)
+
+install-philby:
+	@set -eu; \
+	src_dir="$(CURDIR)/.philby"; \
+	if [ ! -d "$$src_dir" ]; then \
+		echo "Missing $$src_dir"; \
+		exit 2; \
+	fi; \
+	for file in $(PHILBY_EXPORT_FILES); do \
+		if [ ! -f "$$src_dir/$$file" ]; then \
+			echo "Missing $$src_dir/$$file"; \
+			exit 2; \
+		fi; \
+		cp "$$src_dir/$$file" "./$$file"; \
+	done; \
+	if [ ! -f .gitignore ]; then \
+		printf '%s\n' '.philby/' > .gitignore; \
+	elif ! grep -qxF '.philby/' .gitignore; then \
+		printf '\n%s\n' '.philby/' >> .gitignore; \
+	fi
 	$(call success)
 
 clean::
