@@ -20,6 +20,9 @@ The repo is intentionally small:
 - `make ingest`: copies the digest to the clipboard via `pbcopy` (will fail if `pbcopy` is not available).
 - `make update`: refreshes `AGENTS.md` from upstream (`curl` required) and overwrites the local file.
 - `make clean`: removes `.venv/`.
+- `make rocknix`: pulls and runs `ghcr.io/rocknix/rocknix-build:latest` with this repo mounted at `/work` (publishes exposed ports).
+- `make tiefighter-media`: copies a legally-owned TIE Fighter ISO into `./tiefighter.iso` for the container to use.
+- `make tiefighter`: pulls and runs `jgoerzen/dosbox:latest`, mounts this repo at `/dos/drive_c`, exposes VNC on `localhost:5901` (password `tiefighter`), and lets you IMGMOUNT `tiefighter.iso` inside DOSBox so you can switch to the CD drive.
 - `make agent-<target>`: runs `make <target>` inside a tmux split pane (requires `tmux` and being inside an existing tmux session).
 
 ## Python environment

@@ -1,4 +1,9 @@
-.PHONY: digest ingest clean agent-% update
+.PHONY: digest ingest clean agent-% update sync
+
+ADB ?= adb
+SERIAL ?=
+SRC ?= ../warez
+DEST ?=
 
 # /*
 # This is the core philby file that controls the agent interaction on behalf of the user.
@@ -61,3 +66,41 @@ agent-%:
 		echo "Usage: make agent-<target>"; exit 1; \
 	fi; \
 	bash ./pane.sh "agent-$$cmd_target" $(MAKE) "$$cmd_target"
+
+sync:
+	@set -eu; \
+	adb_bin="$(ADB)"; \
+	serial="$(SERIAL)"; \
+	src="$(SRC)"; \
+	dest="$(DEST)"; \
+	adb_cmd() { \
+		if [ -n "$$serial" ]; then "$$adb_bin" -s "$$serial" "$$@"; else "$$adb_bin" "$$@"; fi; \
+	}; \
+	if ! command -v "$$adb_bin" >/dev/null 2>&1; then \
+		echo "Missing $$adb_bin (ADB). On Ubuntu: sudo apt-get install android-tools-adb"; \
+		exit 2; \
+	fi; \
+	src="$${src%/}"; \
+	if [ ! -d "$$src" ]; then \
+		echo "Missing SRC directory: $$src"; \
+		echo "Override with: make sync SRC=\"/path/to/roms\""; \
+		exit 2; \
+	fi; \
+	adb_cmd start-server >/dev/null; \
+	adb_cmd devices -l; \
+	if ! adb_cmd get-state >/dev/null 2>&1; then \
+		echo "No authorized device detected (or USB debugging not enabled)."; \
+		exit 2; \
+	fi; \
+	if [ -z "$$dest" ]; then \
+		dest="$$(adb_cmd shell '\
+for d in /sdcard/ROMs /sdcard/roms /sdcard/Emulation/roms /sdcard/Games /sdcard/games; do \
+  if [ -d "$$d" ]; then echo "$$d"; exit 0; fi; \
+done; \
+echo /sdcard/ROMs' | tr -d '\r')"; \
+	fi; \
+	echo "Using DEST=$$dest"; \
+	adb_cmd shell "mkdir -p \"$$dest\""; \
+	adb_cmd push -p "$$src/." "$$dest/"; \
+	adb_cmd shell "ls -la \"$$dest\" | head -n 50"
+	$(call success)
