@@ -1,12 +1,17 @@
 .DEFAULT_GOAL := .venv
 
-.PHONY: .venv digest ingest clean pane update sync install-philby
+.PHONY: .venv digest ingest clean pane update sync install-philby spec spec-doc agent test
 
 ADB ?= adb
 SERIAL ?=
 SRC ?= ../warez
 DEST ?=
 PHILBY_EXPORT_FILES ?= AGENTS.md CLAUDE.md
+PHILBY_SPEC_TARGETS ?= spec
+SPEC_TARGETS ?= spec-doc
+PHILBY_REQUIRED_FILES ?= Makefile Makefile.new common.mk README.md pane.sh philby-spawner.sh philby-worker.sh
+PHILBY_REQUIRED_COMMANDS ?= awk grep find
+PHILBY_FEATURE_COMMANDS ?= curl wl-copy fixip tmux adb uv
 
 # /*
 # This is the core philby file that controls the agent interaction on behalf of the user.
@@ -38,6 +43,67 @@ endef
 	uv pip install -r requirements.txt
 	$(call success)
 
+spec:
+	@set -eu; \
+	if [ -z "$(SPEC_TARGETS)" ]; then \
+		echo "SPEC_TARGETS is empty" >&2; \
+		exit 2; \
+	fi; \
+	echo "Executing spec targets: $(SPEC_TARGETS)"; \
+	for t in $(SPEC_TARGETS); do \
+		$(MAKE) "$$t"; \
+	done
+	$(call success)
+
+spec-doc:
+	@set -eu; \
+	if ! grep -q "PHILBY_SPEC_START" README.md; then \
+		echo "Missing PHILBY spec block in README.md" >&2; \
+		exit 2; \
+	fi; \
+	if ! grep -q "PHILBY_SPEC_END" README.md; then \
+		echo "Missing PHILBY spec block end in README.md" >&2; \
+		exit 2; \
+	fi; \
+	awk 'BEGIN{printing=0} /PHILBY_SPEC_START/ {printing=1; next} /PHILBY_SPEC_END/ {printing=0; exit} printing {print}' README.md
+
+agent:
+	@set -eu; \
+	PHILBY_SPEC_TARGETS="$(PHILBY_SPEC_TARGETS)" \
+	bash ./philby-spawner.sh
+	$(call success)
+
+test:
+	@set -eu; \
+	echo "Running philby self-test"; \
+	for file in $(PHILBY_REQUIRED_FILES); do \
+		if [ ! -f "$$file" ]; then \
+			echo "Missing required file: $$file" >&2; \
+			exit 2; \
+		fi; \
+	done; \
+	for cmd in $(PHILBY_REQUIRED_COMMANDS); do \
+		if ! command -v "$$cmd" >/dev/null 2>&1; then \
+			echo "Missing required command: $$cmd" >&2; \
+			exit 2; \
+		fi; \
+	done; \
+	if [ -z "$${TMUX:-}" ]; then \
+		echo "TMUX is required for the pane target" >&2; \
+		exit 2; \
+	fi; \
+	for cmd in $(PHILBY_FEATURE_COMMANDS); do \
+		if ! command -v "$$cmd" >/dev/null 2>&1; then \
+			echo "Missing command for full functionality: $$cmd" >&2; \
+			exit 2; \
+		fi; \
+	done; \
+	$(MAKE) spec-doc >/dev/null; \
+	$(MAKE) spec >/dev/null; \
+	$(MAKE) agent >/dev/null; \
+	$(MAKE) digest >/dev/null
+	$(call success)
+
 digest:
 	@echo "=== Project Digest ==="
 	@for file in $$(find . -path "./.uv-cache" -prune -o -type f \( -name "*.py" -o -name "*.md" -o -name "*.txt" -o -name "*.mk" -o -name "*.sh" -o -name "Makefile" \) -print | grep -v venv | grep -v __pycache__ | sort); do \
@@ -48,7 +114,7 @@ digest:
 	$(call success)
 
 ingest:
-	$(MAKE) digest | pbcopy
+	$(MAKE) digest | fixip | wl-copy
 	$(call success)
 
 update:
@@ -90,9 +156,9 @@ pane:
 	@set -eu; \
 	cmd_target="$(target)"; \
 	if [ -z "$$cmd_target" ]; then \
-		bash ./.philby/pane.sh --shell "agent-shell"; \
+		bash ./pane.sh --shell "agent-shell"; \
 	else \
-		bash ./.philby/pane.sh "agent-$$cmd_target" $(MAKE) "$$cmd_target"; \
+		bash ./pane.sh "agent-$$cmd_target" $(MAKE) "$$cmd_target"; \
 	fi
 
 sync:

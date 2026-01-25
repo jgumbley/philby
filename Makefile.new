@@ -1,3 +1,10 @@
+# Makefile.new
+# Guided copy/paste template for a new philby-based project.
+#
+# 1) Copy this file to `Makefile` in your repo root.
+# 2) Copy `common.mk`, `pane.sh`, `philby-spawner.sh`, and `philby-worker.sh`.
+# 3) Add your spec to README.md between PHILBY_SPEC_START/PHILBY_SPEC_END.
+# 4) Run `make test` to validate wiring.
 
 update:
 	$(MAKE) -f common.mk update
