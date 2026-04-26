@@ -1,0 +1,31 @@
+FROM docker.io/tsl0922/ttyd:1.7.7
+
+ARG NODE_VERSION=20.19.0
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        make \
+        python3 \
+        python3-pip \
+        xz-utils \
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+        amd64) node_arch='x64' ;; \
+        arm64) node_arch='arm64' ;; \
+        *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+    && tar -xJf "node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -C /usr/local --strip-components=1 --no-same-owner \
+    && rm "node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+    && python3 -m pip install --no-cache-dir uv \
+    && npm install -g @openai/codex @mariozechner/pi-coding-agent \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+ENV UV_CACHE_DIR=/workspace/.uv-cache
+ENV PI_CODING_AGENT_DIR=/workspace/.pi/agent
+
+CMD ["ttyd", "-W", "-t", "fontSize=18.75", "-i", "0.0.0.0", "-p", "7681", "/bin/sh", "-lc", "cd /workspace && make tui"]
