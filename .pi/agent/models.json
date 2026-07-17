@@ -1,0 +1,34 @@
+{
+  "providers": {
+    "openrouter": {
+      "models": [
+        {
+          "id": "moonshotai/kimi-k3",
+          "name": "OpenRouter MoonshotAI Kimi K3",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": null,
+            "xhigh": null,
+            "max": "max"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 1048576,
+          "maxTokens": 131072,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cacheRead": 0.3,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}
