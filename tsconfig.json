@@ -1,0 +1,1 @@
+{"compilerOptions":{"target":"ES2023","module":"NodeNext","moduleResolution":"NodeNext","outDir":"dist","rootDir":".","strict":true,"skipLibCheck":true,"esModuleInterop":true},"include":["src/**/*.ts","test/**/*.ts","tmux/**/*.ts"]}

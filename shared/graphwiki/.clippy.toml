@@ -1,0 +1,9 @@
+cognitive-complexity-threshold = 9
+too-many-arguments-threshold = 4
+too-many-lines-threshold = 50
+max-fn-params-bools = 1
+excessive-nesting-threshold = 5
+enum-variant-size-threshold = 200
+max-struct-bools = 2
+large-error-threshold = 128
+max-trait-bounds = 3

@@ -1,0 +1,15 @@
+[package]
+name = "graphwiki"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false }
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+tempfile = "3"
+
+[dev-dependencies]
+rust-code-analysis = "0.0.25"
