@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, defineDoc, defineExtension, defineTask, section, Harness, type Conversation, type TaskId } from '@earendil-works/pi-durable';
+import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, Harness, LiveDoc, InboxDoc, ResetEntry, type Conversation, type TaskId, type ToolRegistration } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -16,6 +16,38 @@ export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[]};
 export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
 export const Checks = defineDoc<{ items: Check[] }>({ kind:'philby.checks', version:1, scope:'conversation', history:'latest', fork:'initial', initial: () => ({ items:[] }) });
+export const PlanMode = defineDoc<{ active:boolean; plan:string }>({ kind:'philby.plan', version:1, scope:'conversation', history:'latest', fork:'initial', initial: () => ({ active:false, plan:'' }) });
+export async function capture(conversation:Conversation, all=false) {
+  if(!all) return (await conversation.context(ctx)).entries;
+  const entries=[];
+  let cursor;
+  do {
+    const page=await conversation.entries({order:'ascending'},100,cursor,ctx);
+    entries.push(...page.items);
+    cursor=page.next;
+  } while(cursor);
+  return entries;
+}
+const planModeBlocked = [{type:'text' as const, text:'Tool is not available in PLAN MODE. You may read files using the read tool, but you may not edit files or run shell commands. Present your plan and ask the user to exit plan mode with \'/plan off\' to implement it.'}];
+const PLAN_MODE_PROMPT = [
+'You are an experienced technical leader who is inquisitive and an excellent planner.',
+'In PLAN MODE, the goal is to gather information and get context to create a detailed plan for accomplishing the task, which the user will review and approve before they switch you out of plan mode to implement the solution.',
+'',
+'Rules:',
+'1. Do some information gathering, using the read tool to examine files and understand the codebase. You may not edit files or run shell commands while in plan mode.',
+'2. Ask the user clarifying questions to get a better understanding of the task.',
+'3. Once you have gained more context, break the task down into clear, actionable steps and present a detailed numbered plan for how you will accomplish it.',
+'4. Ask the user if they are pleased with this plan, or if they would like to make any changes. Treat this as a brainstorming session where you can discuss the task and refine the plan.',
+'5. You do not have the ability to leave plan mode yourself; you must wait for the user to do it once they are satisfied. When you have reached a good plan, ask the user to exit plan mode with \'/plan off\' so you can implement the solution.',
+'',
+'Focus on creating a clear, actionable plan rather than a lengthy document. Never provide level-of-effort time estimates; focus solely on breaking the work down into clear steps.'
+].join('\n');
+function planGate(tool: ToolRegistration) {
+  return wrapTool(tool, current => ({...current, execute: async (args, api, context) => {
+    if ((await api.snapshot(PlanMode, api.conversationId, context))?.active) return {output: planModeBlocked};
+    return current.execute(args, api, context);
+  }}));
+}
 const Startup = defineTask<{prompt:string}, {phase:'startup'}, null>({
   name:'philby.startup', version:1, initial:()=>({phase:'startup'}),
   phases:{startup:async(task,runtime,context)=>{
@@ -83,11 +115,13 @@ export class Pane {
           return `Source: ${file}\n\n${source}`;
         })),
         section('unread-updates', () => JSON.stringify(p.store.updates().filter(u=>!u.seen).slice(-50))),
-        section('saved-memory', async (input, context) => JSON.stringify(await input.read.snapshot(Memory, input.conversationId, context)))
-      ]}));
+        section('saved-memory', async (input, context) => JSON.stringify(await input.read.snapshot(Memory, input.conversationId, context))),
+        section('plan-mode', async (input, context) => (await input.read.snapshot(PlanMode, input.conversationId, context))?.active ? PLAN_MODE_PROMPT : undefined),
+        section('approved-plan', async (input, context) => { const doc = await input.read.snapshot(PlanMode, input.conversationId, context); return doc && !doc.active && doc.plan ? `Approved plan:\n${doc.plan}` : undefined; })
+      ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
       p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, env: () => p.env, onReport:e => p.onError(e)}, ctx);
       p.conversation = await p.harness.root(ctx, {agent:{model, cwd:dirs.tools}});
-      await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(Checks,p.conversation.id); },ctx);
+      await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(Checks,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       p.server = await listen(name, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
       p.boot=!!boot || startup;
@@ -144,6 +178,39 @@ export class Pane {
         return {saved:true};
       }
       case 'checks': return this.harness.snapshot(Checks,this.conversation.id,ctx);
+      case 'plan': return this.harness.snapshot(PlanMode,this.conversation.id,ctx);
+      case 'plan-set': {
+        const active = c.active;
+        if(typeof active !== 'boolean') throw Error('active must be a boolean');
+        if(c.plan !== undefined && typeof c.plan !== 'string') throw Error('plan must be a string');
+        let saved: {active:boolean; plan:string} | undefined;
+        await this.conversation.commit(async tx => {
+          if(active) {
+            const live = await tx.doc(LiveDoc, this.conversation.id);
+            if(live.run) throw Error('Cannot enter plan mode while work is active. Wait for current work to complete or stop it with /stop.');
+          }
+          const doc = await tx.doc(PlanMode,this.conversation.id);
+          doc.active=active;
+          if(typeof c.plan==='string' && c.plan.trim()) doc.plan=c.plan;
+          saved={active:doc.active,plan:doc.plan};
+        },ctx);
+        return saved;
+      }
+      case 'new': {
+        await this.conversation.commit(async tx => {
+          const live = await tx.doc(LiveDoc, this.conversation.id);
+          if(live.run) throw Error('Cannot start a new session while work is active. Wait for current work to complete or stop it with /stop.');
+          const inbox = await tx.doc(InboxDoc, this.conversation.id);
+          if(inbox.items.length > 0) throw Error('Cannot start a new session while work is queued. Wait for queued work to complete or stop it with /stop.');
+          const pending = this.store.pending().filter(e => e.kind === 'input');
+          if(pending.length > 0) throw Error('Cannot start a new session while messages are pending delivery. Wait for delivery or stop the pane.');
+          const plan = await tx.doc(PlanMode, this.conversation.id);
+          plan.active = false;
+          plan.plan = '';
+          await tx.appendEntry(ResetEntry, this.conversation.id, {head:'self'});
+        },ctx);
+        return {reset:true};
+      }
       case 'check-set': {
         const value = c.check as Check;
         if (!value?.id || !value.prompt?.trim()) throw Error('Review ID and prompt required');
@@ -172,7 +239,7 @@ export class Pane {
       }
       case 'updates': return this.store.updates(!!c.mark);
       case 'tools': return this.tools();
-      case 'capture': return (await this.conversation.context(ctx)).entries;
+      case 'capture': return capture(this.conversation,c.all===true);
       default: throw Error(`Unknown operation: ${c.op}`);
     }
   }

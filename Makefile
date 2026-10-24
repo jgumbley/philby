@@ -5,9 +5,10 @@ ifneq ($(origin prompt),undefined)
 export PROMPT := $(value prompt)
 endif
 export PROMPT
-export PROMPT_FILE slug from REQUEST_ID MODE FIELD ID PAUSED MARK PHILBY_DETACHED TYPE
+override export PLAN := $(value PLAN)
+export PROMPT_FILE slug from REQUEST_ID MODE FIELD ID PAUSED MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
 export ASK_MODEL REASON_MODEL RESEARCH_MODEL TWITTER_MODEL
-.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason research twitter
+.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason research twitter
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -31,7 +32,7 @@ build: dist/.built
 run: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js open
 pane: run
-pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-updates pane-tools: build
+pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $(@:pane-%=%)
 window quit cleanup migrate-mailboxes: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $@
@@ -56,10 +57,13 @@ help:
 	@echo 'make — create/open pane chooser; make pane slug=<slug> [TYPE=plain|graphwiki] — create or resume'
 	@echo 'pane-new — select a saved pane or New pane; pane-list — saved agents and every live tmux view'
 	@echo 'pane-close pane-stop pane-send pane-capture pane-list pane-memory pane-checks'
-	@echo 'pane-check-set pane-check-pause pane-check-remove pane-updates pane-tools pane-report'
+	@echo 'pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools pane-report'
 	@echo 'Messages and reports: slug=receiving-pane, from=sending-pane (or current pane), REQUEST_ID=, MODE=steer'
-	@echo 'Inputs: FIELD=, ID=, PAUSED=false, MARK=1; TYPE selects a creation recipe'
+	@echo 'Inputs: FIELD=, ID=, PAUSED=false, MARK=1, ACTIVE=1, PLAN=...; TYPE selects a creation recipe'
 	@echo 'Prompts: PROMPT_FILE=path, prompt=..., or stdin. check-set accepts a JSON prompt.'
+	@echo 'Plan mode: pane-plan shows status; pane-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'
+	@echo 'New session: pane-new-session starts a fresh transcript, preserving files, tools, memory and archived history'
+	@echo 'pane-capture ALL=1 — include archived entries from before /new in chronological order'
 	@echo 'window deps build check test digest ingest cleanup; shared: ask reason research twitter'
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'
 	@echo 'digest — print all Git-tracked files; ingest — copy that digest to the Wayland clipboard'

@@ -1,5 +1,5 @@
 import { TuiMainScreen, ProcessTerminal, Input, SelectList, Editor, Markdown, Text, Container, Loader, matchesKey, type MarkdownTheme } from '@earendil-works/pi-tui';
-import { Pane, ctx, type ModelSelection } from './pane.js';
+import { Pane, PlanMode, ctx, type ModelSelection } from './pane.js';
 import { slug } from './store.js';
 const plain=(s:string)=>s;
 const dim=(s:string)=>`\x1b[90m${s}\x1b[39m`;
@@ -56,6 +56,7 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
   let loader:Loader|undefined;let startedAt=0;
   let modelPicker:SelectList|undefined;let selectingModel=false;
   const state=await pane.conversation.viewState(ctx);
+  const planState=await pane.harness.documentState(PlanMode,pane.conversation.id,ctx);
   const render=()=>{
     history.clear();
     const value=state.value;
@@ -93,11 +94,13 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
     for(const tool of reviewActive ? [] : live?.tools || []) if(tool.status!=='done') history.addChild(new Text(dim(`› ${tool.name} ${tool.status}${expanded && tool.output ? '\n'+tool.output : ''}`),0,0));
     const unread=pane.store.updates().filter(u=>!u.seen).length;
     const model=(value.docs['pi.agent'] as any)?.model;
-    header.setText(accent(pane.name)+dim(`  ${model?.modelId || ''}  ${live?.run?'working':'ready'}  ${unread?`${unread} unread updates`:''}`));
-    info.setText(confirmQuit ? 'Quit all Philby panes? [y/n]' : panel || dim('/help · /model · /memory · /checks · /tools · /updates · /quit · Esc stop · Ctrl-O tool output'));
+    const planActive=planState?.value?.active||false;
+    header.setText(accent(pane.name)+dim(`  ${model?.modelId || ''}  ${live?.run?'working':'ready'}${planActive?'  PLAN MODE':''}  ${unread?`${unread} unread updates`:''}`));
+    info.setText(confirmQuit ? 'Quit all Philby panes? [y/n]' : panel || dim('/help · /model · /memory · /checks · /plan · /tools · /updates · /quit · Esc stop · Ctrl-O tool output'));
     tui.requestRender();
   };
   const unsub=state.subscribe(render);
+  const unsubPlan=planState?.subscribe(render);
   const timer=setInterval(render,1000);
   pane.onError=e=>{if(pane.closing){console.error(String(e));process.exitCode=1;}else{panel=String(e);render();}};
   const closeModelPicker=(message:string)=>{
@@ -135,7 +138,7 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       if(command==='/close') {await pane.close();return;}
       if(command==='/model') {await chooseModel();return;}
       if(command==='/stop') await pane.operation({op:'stop'});
-      else if(command==='/help') panel='/model — choose a model for this pane\n/memory [field] — inspect or edit saved memory\n/checks · /check {JSON} · /pause id · /resume id · /remove id\n/tools · /updates · /send slug message · /report slug message\n/steer message · /stop · /close · /quit — quit all panes after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.';
+      else if(command==='/help') panel='/model — choose a model for this pane\n/memory [field] — inspect or edit saved memory\n/checks · /check {JSON} · /pause id · /resume id · /remove id\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — start a fresh session, preserving files, tools, memory and archived history\n/tools · /updates · /send slug message · /report slug message\n/steer message · /stop · /close · /quit — quit all panes after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.';
       else if(command==='/memory') {
         const memory=await pane.operation({op:'memory'}) as Record<string,string>;
         if(rest && rest in memory) {editor.setText(`/save ${rest}\n${memory[rest]}`);panel=`Editing ${rest}. Enter saves; Shift-Enter adds lines.`;render();return;}
@@ -143,6 +146,15 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       } else if(command==='/save') {
         const match=input.match(/^\/save (\w+)\n([\s\S]*)$/);if(!match) throw Error('Use /memory field to edit');
         await pane.operation({op:'memory',field:match[1],content:match[2]});panel='Memory saved.';
+      } else if(command==='/plan') {
+        if(rest==='on') panel=JSON.stringify(await pane.operation({op:'plan-set',active:true}),null,2);
+        else if(rest==='off') panel=JSON.stringify(await pane.operation({op:'plan-set',active:false}),null,2);
+        else if(rest.startsWith('off ')) panel=JSON.stringify(await pane.operation({op:'plan-set',active:false,plan:rest.slice(4)}),null,2);
+        else if(rest==='') panel=JSON.stringify(await pane.operation({op:'plan'}),null,2);
+        else throw Error(`Invalid /plan argument: ${rest}. Use /plan, /plan on, or /plan off [plan]`);
+      } else if(command==='/new') {
+        if(rest) throw Error(`/new takes no arguments; got: ${rest}`);
+        panel=JSON.stringify(await pane.operation({op:'new'}),null,2);
       } else if(command==='/checks' || command==='/tools') panel=JSON.stringify(await pane.operation({op:command.slice(1)}),null,2);
       else if(command==='/updates') panel=JSON.stringify(await pane.operation({op:'updates',mark:true}),null,2);
       else if(command==='/check') panel=JSON.stringify(await pane.operation({op:'check-set',check:JSON.parse(rest)}),null,2);
@@ -170,6 +182,6 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
     if(matchesKey(data,'escape')) {void pane.operation({op:'stop'}).catch(pane.onError);return {consume:true};}
     if(matchesKey(data,'ctrl+c') || matchesKey(data,'ctrl+d')) {void pane.close().catch(pane.onError);return {consume:true};}
   });
-  pane.onClose=()=>{loader?.stop();clearInterval(timer);unsub();state.dispose();tui.stop();};
+  pane.onClose=()=>{loader?.stop();clearInterval(timer);unsub();unsubPlan?.();state.dispose();planState?.dispose();tui.stop();};
   tui.start();render();
 }

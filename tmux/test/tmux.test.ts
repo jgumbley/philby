@@ -271,3 +271,107 @@ test('model picker cancels locally, preserves conversation and persists the sele
     assert.doesNotMatch(JSON.stringify(after.filter((entry:any)=>entry.kind==='pi.user')),/\/model/);
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
+
+test('plan controls preserve literal text and update the terminal from both command interfaces',async()=>{
+  const screen=()=>tmux('capture-pane','-p','-t','philby:planner');
+  const status=async()=>JSON.parse(await make('pane-plan','slug=planner'));
+  const command=(text:string)=>tmux('send-keys','-t','philby:planner','C-u',text,'Enter');
+  const activeHeader=/^planner\s+test\s+ready\s+PLAN MODE\b/m;
+  try {
+    await make('pane','slug=planner');
+    await until(async()=> /^planner\s+test\s+ready/m.test(await screen()));
+    assert.deepEqual(await status(),{active:false,plan:''});
+    await command('/plan on');
+    await until(async()=> activeHeader.test(await screen()));
+    await command('/plan invalid');
+    await until(async()=> (await screen()).includes('Invalid /plan argument'));
+    assert.deepEqual(await status(),{active:true,plan:''});
+    await assert.rejects(make('pane-plan-set','slug=planner','ACTIVE=invalid'),/ACTIVE must be/);
+
+    const approved="1. Preserve 'quotes', $HOME and `literal`.\n2. Keep $(not-a-command) as text.\n";
+    const file=join(directory,'approved-plan');writeFileSync(file,approved);
+    await make('pane-plan-set','slug=planner','ACTIVE=0','PLAN=',`PROMPT_FILE=${file}`);
+    assert.deepEqual(await status(),{active:false,plan:approved});
+    await until(async()=> !activeHeader.test(await screen()));
+    await command('/plan on');
+    await until(async()=> activeHeader.test(await screen()));
+    await command('/plan off');
+    await until(async()=> !activeHeader.test(await screen()));
+    assert.deepEqual(await status(),{active:false,plan:approved});
+    await command('/plan off   ');
+    await until(async()=> (await screen()).includes('"active": false'));
+    assert.deepEqual(await status(),{active:false,plan:approved});
+    await make('pane-plan-set','slug=planner','ACTIVE=0','PLAN=');
+    assert.deepEqual(await status(),{active:false,plan:approved});
+
+    const stdinPlan='1. Plan from stdin\n2. Preserve $HOME literally\n';
+    await run('make',['--no-print-directory','pane-plan-set','slug=planner','ACTIVE=0','PLAN='],stdinPlan);
+    assert.deepEqual(await status(),{active:false,plan:stdinPlan});
+    await run('script',['-qfec',`make --no-print-directory pane-plan-set slug=planner ACTIVE=0 PLAN= PROMPT_FILE=${file}`,'/dev/null']);
+    assert.deepEqual(await status(),{active:false,plan:approved});
+    await make('pane-plan-set','slug=planner','ACTIVE=0',`PLAN=${approved}`);
+    assert.deepEqual(await status(),{active:false,plan:approved});
+    await make('pane-plan-set','slug=planner','ACTIVE=1');
+    await until(async()=> activeHeader.test(await screen()));
+    await make('pane-close','slug=planner');
+    await make('pane','slug=planner');
+    await until(async()=> activeHeader.test(await screen()));
+    assert.deepEqual(await status(),{active:true,plan:approved});
+  } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
+});
+
+test('new context clears the terminal while preserving pane state and inspectable archived history',async()=>{
+  const screen=()=>tmux('capture-pane','-p','-t','philby:sessions');
+  const capture=async(all=false)=>JSON.parse(await make('pane-capture','slug=sessions',`ALL=${all?'1':'0'}`));
+  const idle=()=>until(async()=>JSON.parse(await run('node',['dist/src/cli.js','status','sessions'])).work.tasks.length===0);
+  const command=(text:string)=>tmux('send-keys','-t','philby:sessions','C-u',text,'Enter');
+  try {
+    await make('pane','slug=sessions');
+    await until(async()=> /^sessions\s+test\s+ready/m.test(await screen()));
+    const file=join(env.PHILBY_PANES_DIR,'sessions','kept.txt');writeFileSync(file,'keep this work');
+    await make('pane-memory','slug=sessions','FIELD=notes','prompt=Keep this memory');
+    const memory=JSON.parse(await make('pane-memory','slug=sessions'));
+    await command('before fresh context');
+    await until(async()=>JSON.stringify(await capture()).includes('Received: before fresh context'));
+    await idle();
+    const before=await capture(true);
+    await make('pane-plan-set','slug=sessions','ACTIVE=0','PLAN=Old approved plan');
+    await make('pane-plan-set','slug=sessions','ACTIVE=1');
+    await until(async()=> /^sessions\s+test\s+ready\s+PLAN MODE\b/m.test(await screen()));
+    await command('/new unexpected');
+    await until(async()=> (await screen()).includes('/new takes no arguments'));
+    assert.deepEqual(await capture(true),before);
+    await command('/new');
+    await until(async()=> (await capture()).length===1);
+    assert.equal((await capture())[0].kind,'pi.reset');
+    await until(async()=> !/before fresh context|PLAN MODE/.test(await screen()));
+    assert.deepEqual(JSON.parse(await make('pane-plan','slug=sessions')),{active:false,plan:''});
+    assert.deepEqual(JSON.parse(await make('pane-memory','slug=sessions')),memory);
+    assert.equal(readFileSync(file,'utf8'),'keep this work');
+    const archive=await capture(true);
+    assert.deepEqual(archive.slice(0,before.length),before);
+    assert.match(JSON.stringify(archive),/before fresh context/);
+
+    await command('after fresh context');
+    await until(async()=>JSON.stringify(await capture()).includes('Received: after fresh context'));
+    await idle();
+    const current=await capture(),full=await capture(true);
+    assert.doesNotMatch(JSON.stringify(current),/before fresh context|Old approved plan/);
+    await make('pane-close','slug=sessions');
+    assert.deepEqual(await capture(),current);
+    assert.deepEqual(await capture(true),full);
+    await make('pane','slug=sessions');
+    await until(async()=> (await screen()).includes('after fresh context'));
+    assert.doesNotMatch(await screen(),/before fresh context/);
+    assert.deepEqual(await capture(),current);
+    await make('pane-new-session','slug=sessions');
+    assert.deepEqual((await capture()).map((entry:any)=>entry.kind),['pi.reset']);
+    assert.match(JSON.stringify(await capture(true)),/after fresh context/);
+    assert.equal((await tmux('list-windows','-t','philby','-F','#{window_name}')).trim(),'sessions');
+    await make('pane-new');
+    const chooser=await selector();
+    assert.match(await tmux('capture-pane','-p','-t',chooser),/New pane[\s\S]*sessions/);
+    await tmux('send-keys','-t',chooser,'Escape');
+    await until(async()=> (await tmux('list-windows','-t','philby','-F','#{window_name}')).trim()==='sessions');
+  } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
+});

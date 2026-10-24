@@ -5,7 +5,7 @@ import { root, panesRoot, slug, Store, envelope, locked, lock, configured, paneT
 import { migrateMailboxes } from './mailboxes.js';
 import { request, running } from './ipc.js';
 import { models } from './models.js';
-import { Pane, ctx } from './pane.js';
+import { Pane, capture, ctx } from './pane.js';
 import { selectPane, startTui } from './tui.js';
 import { openPane, openSelector, listViews, openShell, stopServer } from '../tmux/index.js';
 import { Harness, createRegistry } from '@earendil-works/pi-durable';
@@ -98,13 +98,24 @@ async function main() {
     const path=join(paths(name).state,'durable.sqlite');if(!existsSync(path)) throw Error('No saved conversation');
     const release=lock(name);
     const h=await Harness.open(await openNodeSqliteStorage(path),{models:createModels(),registry:createRegistry()},ctx);
-    try {console.log(JSON.stringify((await (await h.root(ctx)).context(ctx)).entries,null,2));}finally{await h.close(ctx);release();}return;
+    try {console.log(JSON.stringify(await capture(await h.root(ctx),process.env.ALL==='1'),null,2));}finally{await h.close(ctx);release();}return;
   }
-  const op:Record<string,unknown>={op:command};
+  const op:Record<string,unknown>={op:command==='new-session'?'new':command};
   if(command==='memory' && process.env.FIELD) Object.assign(op,{field:process.env.FIELD,content:await prompt()});
   if(command==='check-set') op.check=JSON.parse(await prompt());
   if(command==='check-pause' || command==='check-remove') Object.assign(op,{id:process.env.ID,paused:process.env.PAUSED!=='false'});
+  if(command==='plan-set') {
+    const activeEnv=process.env.ACTIVE;
+    if(activeEnv!=='0' && activeEnv!=='1' && activeEnv!=='true' && activeEnv!=='false') throw Error(`ACTIVE must be 0, 1, true, or false; got: ${activeEnv}`);
+    op.active=activeEnv==='1'||activeEnv==='true';
+    if(process.env.PLAN!==undefined && process.env.PLAN.trim()) op.plan=process.env.PLAN;
+    else if(!op.active && (process.env.PROMPT_FILE || process.env.PROMPT || !process.stdin.isTTY)) {
+      const text=await prompt();
+      if(text.trim()) op.plan=text;
+    }
+  }
   if(command==='updates') op.mark=process.env.MARK==='1';
+  if(command==='capture') op.all=process.env.ALL==='1';
   console.log(JSON.stringify(await request(name,op as {op:string}),null,2));
 }
 main().catch(e=>{console.error(String(e));process.exitCode=1;});

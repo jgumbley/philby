@@ -63,9 +63,29 @@ Enter submits, Shift-Enter inserts a newline, and follow-ups queue while work is
 | `/updates` | Read and mark passive reports |
 | `/send slug message` | Queue input in the receiving pane |
 | `/report slug message` | Record a passive update in the receiving pane |
+| `/plan`, `/plan on`, `/plan off [plan]` | Read-only plan mode: research and present a plan before editing |
+| `/new` | Start a fresh session, preserving files, tools, memory and archived history |
 | `/close`, `/quit` | Suspend this pane or confirm closing the workspace |
 
 Memory fields are `responsibilities`, `notes`, `decisions`, `outstanding` and `sources`. They live separately from the transcript and enter model requests after compaction. `SCOPE.md` is the standing definition of the pane's remit; memory holds learned facts, decisions and working context. The existing `responsibilities` field and its saved contents remain available without copying the scope into it. Model changes preserve conversation, memory and queued work.
+
+Plan mode restricts the pane to read-only operations. While active, the model can use the native `read` tool to examine files but cannot edit files or run shell commands. The header shows `PLAN MODE` when active. Entering plan mode requires no active work; exit with `/plan off` to resume normal operation. An approved plan supplied at exit is included in subsequent model context.
+
+```sh
+make pane-plan slug=research
+make pane-plan-set slug=research ACTIVE=1
+make pane-plan-set slug=research ACTIVE=0 PLAN='1. Implement the feature'
+printf '1. Step one\n2. Step two\n' | make pane-plan-set slug=research ACTIVE=0
+```
+
+`ACTIVE` must be exactly `0`, `1`, `true`, or `false`. A nonempty `PLAN` supplies the approved plan; otherwise use the usual `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin precedence. Exiting without replacement text preserves any previously saved plan. Reads of explicit prompt files fail visibly if unavailable.
+
+`/new` starts a fresh model context in the existing Durable conversation while retaining prior transcript entries, files, tools, instructions, durable memory, model selection and review schedules. Plan mode begins off with no approved plan in the fresh context. `/new` rejects while work is active, queued or awaiting mailbox delivery; it does not cancel work. Reopening preserves the fresh context. Add `ALL=1` to capture the full archived history in chronological order.
+
+```sh
+make pane-new-session slug=research
+make pane-capture slug=research ALL=1
+```
 
 ```sh
 make pane-memory slug=research FIELD=notes PROMPT_FILE=/absolute/path/notes.txt

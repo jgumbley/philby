@@ -5,9 +5,10 @@ import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, write
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext } from '@earendil-works/pi-ai';
+import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
+import { InboxDoc } from '@earendil-works/pi-durable';
 const directory=mkdtempSync(join(tmpdir(),'philby-test-'));
 process.env.PHILBY_ROOT=directory;process.env.PHILBY_PANES_DIR=join(directory,'panes');
 writeFileSync(join(directory,'PANE.md'),'shared-pane-guidance');
@@ -459,5 +460,273 @@ test('legacy mailbox migration does not acknowledge conflicting content',()=>{
     assert.equal(legacy.prepare('SELECT delivered FROM outbox WHERE id=?').get(e.id)!.delivered,0);
     assert.deepEqual(receiving.pending(),[e]);
   }finally{receiving.close();legacy.close();}
+});
+test('plan mode gates mutating tools to read-only until exited',async()=>{
+  const target=join(directory,'plan-target');
+  const f=fixture([
+    async(context:TranscriptContext)=>{
+      const sections=Object.assign({},...context.messages.filter(m=>m.role==='system').map(m=>m.sections));
+      assert.ok(JSON.stringify(sections).includes('PLAN MODE'));
+      return fauxAssistantMessage([
+        fauxToolCall('write',{path:target,content:'should not be written'}),
+        fauxToolCall('bash',{command:`echo changed >> '${target}'`}),
+        fauxToolCall('bash',{command:`cat '${join(directory,'PANE.md')}'`}),
+        fauxToolCall('edit',{path:join(directory,'PANE.md'),edits:[{oldText:'shared',newText:'changed'}]})
+      ],{stopReason:'toolUse'});
+    },
+    fauxAssistantMessage('plan presented')
+  ]);
+  const p=await Pane.open('plan-mode',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:true});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:true,plan:''});
+    assert.equal((await (await p.conversation.submit({type:'input',content:'design a change'},ctx)).wait(ctx)).status,'done');
+    assert.equal(existsSync(target),false);
+    assert.equal(readFileSync(join(directory,'PANE.md'),'utf8'),'shared-pane-guidance');
+    await p.operation({op:'plan-set',active:false,plan:'1. do the thing'});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'1. do the thing'});
+  }finally{await p.close();}
+});
+test('plan mode blocks shell bypass attempts',async()=>{
+  const target=join(directory,'bypass-target');
+  const victim=join(directory,'victim.tmp');
+  writeFileSync(victim,'important data');
+  const f=fixture([
+    fauxAssistantMessage([
+      fauxToolCall('bash',{command:`sort -o '${target}' /dev/null`}),
+      fauxToolCall('bash',{command:`find '${directory}' -name '*.tmp' -delete`}),
+      fauxToolCall('bash',{command:`echo first\necho second > '${target}'`}),
+      fauxToolCall('read',{path:join(directory,'PANE.md')})
+    ],{stopReason:'toolUse'}),
+    async(context:TranscriptContext)=>{
+      const last=context.messages.filter(m=>m.role==='toolResult').at(-1);
+      assert.ok(last);
+      assert.equal(last.isError,false);
+      assert.equal(last.toolName,'read');
+      assert.ok(JSON.stringify(last.content).includes('shared-pane-guidance'));
+      return fauxAssistantMessage('done');
+    }
+  ]);
+  const p=await Pane.open('plan-bypass',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:true});
+    assert.equal((await (await p.conversation.submit({type:'input',content:'try bypasses'},ctx)).wait(ctx)).status,'done');
+    assert.equal(existsSync(target),false);
+    assert.equal(readFileSync(victim,'utf8'),'important data');
+  }finally{await p.close();}
+});
+test('plan mode rejects activation while work is active',async()=>{
+  const releaseFile=join(directory,'busy-release');
+  const effectFile=join(directory,'busy-effect');
+  const f=fixture([
+    fauxAssistantMessage([
+      fauxToolCall('bash',{command:`echo started >> '${effectFile}'; while [ ! -f '${releaseFile}' ]; do sleep .02; done; echo finished >> '${effectFile}'`})
+    ],{stopReason:'toolUse'}),
+    fauxAssistantMessage('work done')
+  ]);
+  const p=await Pane.open('plan-busy',f.models,model);
+  try {
+    const submission=await p.conversation.submit({type:'input',content:'slow work'},ctx);
+    await until(()=>existsSync(effectFile));
+    await assert.rejects(p.operation({op:'plan-set',active:true}),/Cannot enter plan mode while work is active/);
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
+    writeFileSync(releaseFile,'go');
+    await submission.wait(ctx);
+    assert.equal(readFileSync(effectFile,'utf8'),'started\nfinished\n');
+    await p.operation({op:'plan-set',active:true});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:true,plan:''});
+  }finally{await p.close();}
+});
+test('plan mode initializes with explicit default state',async()=>{
+  const f=fixture([fauxAssistantMessage('ok')]);
+  const p=await Pane.open('plan-init',f.models,model);
+  try {
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
+  }finally{await p.close();}
+});
+test('approved plan reaches model context after exit',async()=>{
+  const f=fixture([
+    async(context:TranscriptContext)=>{
+      const sections=Object.assign({},...context.messages.filter(m=>m.role==='system').map(m=>m.sections));
+      assert.ok(JSON.stringify(sections).includes('PLAN MODE'));
+      return fauxAssistantMessage('here is my plan');
+    },
+    async(context:TranscriptContext)=>{
+      const sections=Object.assign({},...context.messages.filter(m=>m.role==='system').map(m=>m.sections));
+      assert.ok(JSON.stringify(sections).includes('Approved plan:'));
+      assert.ok(JSON.stringify(sections).includes('1. implement the feature'));
+      return fauxAssistantMessage('implementing now');
+    }
+  ]);
+  const p=await Pane.open('plan-context',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:true});
+    await (await p.conversation.submit({type:'input',content:'plan something'},ctx)).wait(ctx);
+    await p.operation({op:'plan-set',active:false,plan:'1. implement the feature'});
+    await (await p.conversation.submit({type:'input',content:'go ahead'},ctx)).wait(ctx);
+  }finally{await p.close();}
+});
+test('plan persists across pane reopen',async()=>{
+  const f=fixture([fauxAssistantMessage('ok')]);
+  let p=await Pane.open('plan-persist',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:false,plan:'saved plan text'});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'saved plan text'});
+  }finally{await p.close();}
+  p=await Pane.open('plan-persist',f.models,model);
+  try {
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'saved plan text'});
+  }finally{await p.close();}
+});
+test('exit without replacement preserves existing plan',async()=>{
+  const f=fixture([fauxAssistantMessage('ok')]);
+  const p=await Pane.open('plan-preserve',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:false,plan:'original plan'});
+    await p.operation({op:'plan-set',active:true});
+    await p.operation({op:'plan-set',active:false});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'original plan'});
+  }finally{await p.close();}
+});
+test('new session starts fresh context while preserving memory and history',async()=>{
+  const f=fixture([
+    fauxAssistantMessage('first session answer'),
+    async(context:TranscriptContext)=>{
+      const supplied=JSON.stringify(context);
+      assert.ok(!supplied.includes('first question'));
+      assert.ok(!supplied.includes('old approved plan'));
+      assert.ok(supplied.includes('important memory'));
+      return fauxAssistantMessage('second session answer');
+    }
+  ]);
+  const p=await Pane.open('new-session',f.models,model);
+  try {
+    const conversationId=p.conversation.id;
+    const file=join(paths('new-session').tools,'kept.txt');
+    writeFileSync(file,'saved work');
+    await p.operation({op:'memory',field:'notes',content:'important memory'});
+    await p.operation({op:'check-set',check:{id:'later',intervalMs:3600000,prompt:'review later'}});
+    const reviews=await p.operation({op:'checks'});
+    const agent=await p.conversation.agent(ctx);
+    await (await p.conversation.submit({type:'input',content:'first question'},ctx)).wait(ctx);
+    await p.conversation.commit(async tx=>{for(let i=0;i<105;i++)await tx.appendEntry(p.conversation.id,{kind:'test.archive',data:{i}});},ctx);
+    const before=await p.operation({op:'capture',all:true}) as any[];
+    assert.ok(before.length>100);
+    await p.operation({op:'plan-set',active:true,plan:'old approved plan'});
+    await p.operation({op:'new'});
+    const after=await p.conversation.context(ctx);
+    assert.equal(after.entries.length,1);
+    assert.equal(after.entries[0].kind,'pi.reset');
+    assert.deepEqual(await p.operation({op:'memory'}),{responsibilities:'',notes:'important memory',decisions:'',outstanding:'',sources:''});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
+    assert.deepEqual(await p.operation({op:'checks'}),reviews);
+    assert.deepEqual((await p.conversation.agent(ctx)).model,agent.model);
+    assert.equal(p.conversation.id,conversationId);
+    assert.equal(readFileSync(file,'utf8'),'saved work');
+    assert.deepEqual((await p.operation({op:'capture',all:true}) as any[]).slice(0,before.length),before);
+    await (await p.conversation.submit({type:'input',content:'second question'},ctx)).wait(ctx);
+  }finally{await p.close();}
+});
+test('new session rejects while work is active',async()=>{
+  const releaseFile=join(directory,'new-release');
+  const effectFile=join(directory,'new-effect');
+  const f=fixture([
+    fauxAssistantMessage([
+      fauxToolCall('bash',{command:`echo started >> '${effectFile}'; while [ ! -f '${releaseFile}' ]; do sleep .02; done; echo finished >> '${effectFile}'`})
+    ],{stopReason:'toolUse'}),
+    fauxAssistantMessage('work done')
+  ]);
+  const p=await Pane.open('new-busy',f.models,model);
+  try {
+    const submission=await p.conversation.submit({type:'input',content:'slow work'},ctx);
+    await until(()=>existsSync(effectFile));
+    await assert.rejects(p.operation({op:'new'}),/Cannot start a new session while work is active/);
+    writeFileSync(releaseFile,'go');
+    await submission.wait(ctx);
+    await p.operation({op:'new'});
+    assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
+  }finally{await p.close();}
+});
+test('new session persists across pane reopen',async()=>{
+  const f=fixture([
+    fauxAssistantMessage('old session'),
+    fauxAssistantMessage('new session')
+  ]);
+  let p=await Pane.open('new-persist',f.models,model);
+  try {
+    await (await p.conversation.submit({type:'input',content:'old question'},ctx)).wait(ctx);
+    await p.operation({op:'new'});
+    await (await p.conversation.submit({type:'input',content:'new question'},ctx)).wait(ctx);
+  }finally{await p.close();}
+  p=await Pane.open('new-persist',f.models,model);
+  try {
+    const context=await p.conversation.context(ctx);
+    const texts=context.messages.map(m=>m.role==='user'||m.role==='assistant'?String(m.content):'').join(' ');
+    assert.ok(!texts.includes('old question'));
+    assert.ok(texts.includes('new question'));
+  }finally{await p.close();}
+});
+test('new session preserves queued work, pending deliveries and request identities',async()=>{
+  const f=fixture([fauxAssistantMessage('queued done'),fauxAssistantMessage('delivery done')]);
+  const p=await Pane.open('new-queued',f.models,model);
+  try {
+    await p.conversation.commit(async tx=>{
+      const inbox=await tx.doc(InboxDoc,p.conversation.id);
+      const submission=await tx.createSubmission({conversationId:p.conversation.id,type:'input',status:'queued',requestId:'queued-before-reset'});
+      inbox.items.push({id:submission.id,mode:'followUp',content:'queued before reset'});
+    },ctx);
+    await assert.rejects(p.operation({op:'new'}),/work is (queued|active)/);
+    await p.tick();
+    await p.conversation.waitForIdle(ctx);
+    assert.ok(JSON.stringify(await p.operation({op:'capture'})).includes('queued before reset'));
+    const message=envelope('sender','new-queued','delivery before reset',{id:'stable-reset-delivery'});
+    p.store.accept(message);
+    await assert.rejects(p.operation({op:'new'}),/pending delivery|work is (queued|active)/);
+    await p.tick();
+    await p.conversation.waitForIdle(ctx);
+    assert.ok(JSON.stringify(await p.operation({op:'capture'})).includes('delivery before reset'));
+    await p.operation({op:'new'});
+    p.store.accept(message);
+    await p.tick();
+    assert.equal(f.faux.state.callCount,2);
+    assert.deepEqual((await p.operation({op:'capture'}) as any[]).map(entry=>entry.kind),['pi.reset']);
+    assert.ok(JSON.stringify(await p.operation({op:'capture',all:true})).includes('delivery before reset'));
+  }finally{await p.close();}
+});
+test('CLI plan-set validates ACTIVE and preserves plan on empty exit',async()=>{
+  const f=fixture([fauxAssistantMessage('ok')]);
+  const p=await Pane.open('plan-cli',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:false,plan:'saved plan'});
+    const cliPath=new URL('../../dist/src/cli.js',import.meta.url).pathname;
+    const env={...process.env,PHILBY_PANE:'plan-cli'};
+    const run=(args:string[],envVars:Record<string,string>,input?:string)=>new Promise<{code:number,stdout:string,stderr:string}>((resolve,reject)=>{
+      const child=spawn('node',['--disable-warning=ExperimentalWarning',cliPath,...args],{env:{...env,...envVars},stdio:['pipe','pipe','pipe']});
+      let stdout='',stderr='';
+      child.stdout.on('data',d=>stdout+=d);
+      child.stderr.on('data',d=>stderr+=d);
+      child.on('close',code=>resolve({code:code||0,stdout,stderr}));
+      if(input!==undefined) child.stdin.end(input); else child.stdin.end();
+    });
+    const bad=await run(['plan-set'],{ACTIVE:'invalid'},'');
+    assert.notEqual(bad.code,0);
+    const output=bad.stderr+bad.stdout;
+    assert.ok(output.includes('ACTIVE must be'),`Expected error about ACTIVE, got: ${output}`);
+    const emptyPlan=await run(['plan-set'],{ACTIVE:'0',PLAN:''},'');
+    assert.equal(emptyPlan.code,0);
+    assert.deepEqual(JSON.parse(emptyPlan.stdout),{active:false,plan:'saved plan'});
+    const newPlan=await run(['plan-set'],{ACTIVE:'0'},'1. new plan\n2. second step\n');
+    assert.equal(newPlan.code,0);
+    assert.deepEqual(JSON.parse(newPlan.stdout),{active:false,plan:'1. new plan\n2. second step\n'});
+  }finally{await p.close();}
+});
+test('plan-set preserves plan on empty exit via operation',async()=>{
+  const f=fixture([fauxAssistantMessage('ok')]);
+  const p=await Pane.open('plan-preserve-op',f.models,model);
+  try {
+    await p.operation({op:'plan-set',active:false,plan:'saved plan'});
+    const result=await p.operation({op:'plan-set',active:false});
+    assert.deepEqual(result,{active:false,plan:'saved plan'});
+  }finally{await p.close();}
 });
 test.after(()=>rmSync(directory,{recursive:true,force:true}));
