@@ -121,6 +121,9 @@ export class Pane {
       ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
       p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, env: () => p.env, onReport:e => p.onError(e)}, ctx);
       p.conversation = await p.harness.root(ctx, {agent:{model, cwd:dirs.tools}});
+      const selected=(await p.conversation.agent(ctx)).model;
+      if(!selected) throw Error('Saved conversation has no model');
+      if(!models.getModel(selected.provider,selected.modelId)) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(Checks,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       p.server = await listen(name, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');

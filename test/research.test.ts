@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,14 @@ import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const { readPrompt, research } = await import(pathToFileURL(join(process.cwd(), 'shared/research.mjs')).href);
-const env = { OPENROUTER_API_KEY: 'test-research-credential' };
+const providerRoot = mkdtempSync(join(tmpdir(), 'philby-research-providers-'));
+const credential = 'test-research-credential';
+const providerSource = `TYPE=openrouter\nAPI_KEY=${credential}\nMODELS=z-ai/glm-5.2\n`;
+writeFileSync(join(providerRoot, 'openrouter.provider'), providerSource);
+writeFileSync(join(providerRoot, 'work.provider'), providerSource.replace(credential, 'work-credential'));
+writeFileSync(join(providerRoot, '.env'), 'RESEARCH_MODEL=openrouter/z-ai/glm-5.2\n');
+const env = { PHILBY_ROOT: providerRoot };
+after(() => rmSync(providerRoot, { recursive: true, force: true }));
 const completion = (content: unknown = 'Use the documented command.', finish = 'stop') => ({ choices: [{ message: { role: 'assistant', content }, finish_reason: finish }] });
 
 test('research preserves prompt precedence and literal input', () => {
@@ -31,7 +38,7 @@ test('research preserves prompt precedence and literal input', () => {
 });
 
 test('research requests bounded OpenRouter search and fetch using the exact catalog model', async () => {
-  for (const requested of [undefined, 'openrouter/z-ai/glm-5.2']) {
+  for (const requested of [undefined, 'openrouter/z-ai/glm-5.2', 'work/z-ai/glm-5.2']) {
     let calls = 0;
     const answer = await research('Find the next step.\nKeep $HOME literal.', {
       env: { ...env, RESEARCH_MODEL: requested },
@@ -39,7 +46,7 @@ test('research requests bounded OpenRouter search and fetch using the exact cata
         calls++;
         assert.equal(url, 'https://openrouter.ai/api/v1/chat/completions');
         assert.equal(options.method, 'POST');
-        assert.equal(new Headers(options.headers).get('Authorization'), `Bearer ${env.OPENROUTER_API_KEY}`);
+        assert.equal(new Headers(options.headers).get('Authorization'), `Bearer ${requested?.startsWith('work/') ? 'work-credential' : credential}`);
         assert.equal(new Headers(options.headers).get('Content-Type'), 'application/json');
         assert.ok(options.signal instanceof AbortSignal);
         assert.equal(options.signal.aborted, false);
@@ -60,9 +67,13 @@ test('research requests bounded OpenRouter search and fetch using the exact cata
 test('research rejects missing credentials and unsupported model names before calling OpenRouter', async () => {
   let calls = 0;
   const fetch = async () => { calls++; throw Error('Unexpected HTTP request'); };
-  await assert.rejects(research('question', { env: {}, fetch }), /OPENROUTER_API_KEY/);
+  const empty = mkdtempSync(join(tmpdir(), 'philby-research-empty-'));
+  try {
+    writeFileSync(join(empty, 'openrouter.provider'), providerSource.replace(credential, ''));
+    await assert.rejects(research('question', { env: { PHILBY_ROOT: empty }, fetch }), /API_KEY/);
+  } finally { rmSync(empty, { recursive: true, force: true }); }
   await assert.rejects(research(' \n', { env, fetch }), /nonempty/);
-  for (const model of ['not-a-model', 'openai/gpt-5.5:online']) {
+  for (const model of ['openrouter/not-a-model', 'openrouter/openai/gpt-5.5:online']) {
     await assert.rejects(research('question', { env: { ...env, RESEARCH_MODEL: model }, fetch }), /unavailable|omit :online/);
   }
   assert.equal(calls, 0);
@@ -86,9 +97,9 @@ test('research surfaces HTTP, malformed, incomplete and empty responses without 
     assert.equal(calls, 1);
   }
   let calls = 0;
-  await assert.rejects(research('question', { env, fetch: async () => { calls++; throw Error(`Connection failed for ${env.OPENROUTER_API_KEY}`); } }), error => {
+  await assert.rejects(research('question', { env, fetch: async () => { calls++; throw Error(`Connection failed for ${credential}`); } }), error => {
     assert.match(String(error), /Connection failed/);
-    assert.ok(!String(error).includes(env.OPENROUTER_API_KEY));
+    assert.ok(!String(error).includes(credential));
     return true;
   });
   assert.equal(calls, 1);
@@ -104,16 +115,17 @@ test('root and shared Make research preserve caller inputs and return only text 
   writeFileSync(promptFile, literal);
   writeFileSync(preload, `globalThis.fetch = async (url, options) => {
     if (url !== 'https://openrouter.ai/api/v1/chat/completions') throw Error('Unexpected endpoint');
-    if (options.headers.Authorization !== 'Bearer test-research-credential') throw Error('Environment credential was not preserved');
-    const content = JSON.parse(options.body).messages.at(-1).content;
+    if (options.headers.Authorization !== 'Bearer test-research-credential') throw Error('Provider credential was not preserved');
+    const request = JSON.parse(options.body);
+    const content = request.messages.at(-1).content;
     if (content === 'fail-request') return Response.json({error:{message:'Research unavailable'}},{status:503});
-    return Response.json({choices:[{message:{content},finish_reason:'stop'}],usage:{total_tokens:20}});
+    return Response.json({choices:[{message:{content:content==='report-model'?request.model:content},finish_reason:'stop'}],usage:{total_tokens:20}});
   };`);
   function make(args: string[], input = ''): Promise<{ code: number | null, out: string, err: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn('make', ['--no-print-directory', '-s', ...args], {
         cwd: process.cwd(),
-        env: { ...process.env, ...env, PROMPT: '', PROMPT_FILE: '', RESEARCH_MODEL: '', NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`, PHILBY_HOME: state, PHILBY_PANES_DIR: panes, PHILBY_TEST_PROVIDER: '1' },
+        env: { ...process.env, ...env, PROMPT: '', PROMPT_FILE: '', RESEARCH_MODEL: undefined, NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`, PHILBY_HOME: state, PHILBY_PANES_DIR: panes, PHILBY_TEST_PROVIDER: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       let out = '', err = '';
@@ -135,6 +147,8 @@ test('root and shared Make research preserve caller inputs and return only text 
       assert.equal(result.code, 0, result.err);
       assert.equal(result.out, literal + '\n');
     }
+    assert.equal((await make(['research'], 'report-model')).out, 'z-ai/glm-5.2\n');
+    assert.equal((await make(['research', 'RESEARCH_MODEL=openrouter/openai/gpt-5.5'], 'report-model')).out, 'openai/gpt-5.5\n');
     const failure = await make(['research'], 'fail-request');
     assert.notEqual(failure.code, 0);
     assert.equal(failure.out, '');
@@ -160,4 +174,17 @@ test('research timeout covers the initial request and response body', async () =
     await assert.rejects(research('question', { env, fetch, signal: controller.signal }), /timed out/);
     assert.equal(calls, 1);
   }
+});
+
+test('research rejects gateway models without sending OpenRouter-specific tools', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'philby-research-gateway-'));
+  try {
+    writeFileSync(join(directory, 'gateway.provider'), 'TYPE=openai-compatible\nBASE_URL=https://gateway.example/v1\nAPI_KEY=test-key\nCATALOG=anthropic\nMODELS=claude-sonnet-5-5\n');
+    let calls = 0;
+    await assert.rejects(research('question', {
+      env: { PHILBY_ROOT: directory, RESEARCH_MODEL: 'gateway/claude-sonnet-5-5' },
+      fetch: async () => { calls++; throw Error('Unexpected HTTP request'); },
+    }), /requires OpenRouter web tools/);
+    assert.equal(calls, 0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

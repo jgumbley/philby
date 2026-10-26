@@ -1,0 +1,5 @@
+TYPE=openai-compatible
+BASE_URL=https://gateway.example/v1
+API_KEY=
+CATALOG=anthropic
+MODELS=claude-sonnet-5-5

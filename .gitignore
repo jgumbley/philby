@@ -8,3 +8,5 @@ dist/
 **/.state/
 *.wav
 *.WAV
+/*.provider
+/*.provider.disabled

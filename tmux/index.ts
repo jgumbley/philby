@@ -17,7 +17,7 @@ function tmux(args:string[], allowFailure=false) {
 }
 const quote=(s:string)=>`'${s.replaceAll("'", "'\\''")}'`;
 function launch(action:string,name?:string) {
-  const keys=['PHILBY_TEST_PROVIDER','PI_MODEL_ID'];
+  const keys=['PHILBY_TEST_PROVIDER'];
   const env=['PHILBY_ROOT='+root,'PHILBY_PANES_DIR='+panesRoot,'PHILBY_TMUX_SOCKET='+server(),...keys.filter(k=>process.env[k]).map(k=>`${k}=${process.env[k]}`)];
   return ['env','-u','slug',...env,process.execPath,'--disable-warning=ExperimentalWarning',cli,action,...(name?[name]:[])].map(quote).join(' ');
 }

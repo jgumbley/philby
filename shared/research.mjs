@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
+import { models } from '../dist/src/models.js';
+import { configRoot, consultationDefaults } from '../dist/src/providers.js';
 
 export function readPrompt(env = process.env, input = process.stdin) {
   let prompt;
@@ -17,13 +18,15 @@ export function readPrompt(env = process.env, input = process.stdin) {
 
 export async function research(prompt, { env = process.env, fetch = globalThis.fetch, signal = AbortSignal.timeout(120_000) } = {}) {
   if (!prompt.trim()) throw Error('A nonempty research prompt is required');
-  const key = env.OPENROUTER_API_KEY;
-  if (!key) throw Error('OPENROUTER_API_KEY is required');
-  const model = (env.RESEARCH_MODEL || 'openai/gpt-5.5').replace(/^openrouter\//, '');
-  if (model.endsWith(':online')) throw Error('RESEARCH_MODEL must omit :online; research already enables web search and fetch');
-  if (!openrouterProvider().getModels().some(entry => entry.id === model)) throw Error(`OpenRouter model unavailable: ${model}`);
+  const reference = env.RESEARCH_MODEL || consultationDefaults.research;
+  if (reference.endsWith(':online')) throw Error('RESEARCH_MODEL must omit :online; research already enables web search and fetch');
+  const config = await models(reference, { directory: env.PHILBY_ROOT || configRoot(), env: { ...env, PHILBY_TEST_PROVIDER: undefined } });
+  if (config.providerType !== 'openrouter') throw Error('Research requires OpenRouter web tools; select an OpenRouter model with RESEARCH_MODEL');
+  const model = config.model.modelId;
+  const provider = config.models.getProvider(config.model.provider);
+  const key = (await config.models.getAuth(config.model.provider)).auth.apiKey;
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       signal,
@@ -63,8 +66,8 @@ export async function research(prompt, { env = process.env, fetch = globalThis.f
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const envFile = new URL('../.env', import.meta.url);
-    if (existsSync(envFile)) process.loadEnvFile(fileURLToPath(envFile));
+    const envFile = resolve(configRoot(), '.env');
+    if (existsSync(envFile)) process.loadEnvFile(envFile);
     console.log(await research(readPrompt()));
   } catch (error) { console.error(String(error)); process.exitCode = 1; }
 }

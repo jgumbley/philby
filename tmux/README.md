@@ -28,4 +28,6 @@ Ctrl-End moves to the next window, or opens a pane selector when already at the 
 
 Use `/quit` from any agent pane, or `make quit` from a shell. Confirm with `y` to gracefully close every pane and the Philby tmux workspace, preserving conversations, memory, queued work, checks and tools. `make cleanup` provides noninteractive closure. After quitting, run `make` to choose a saved pane or `make pane slug=...` to resume it directly.
 
-Run `make -C tmux check` for the shared TypeScript checks and `make -C tmux test` for this module's integration suite. The tests use deterministic providers, temporary state, isolated tmux servers and util-linux `script`; they do not call paid models or use the live workspace.
+Run `make -C tmux check` for the shared TypeScript checks and `make -C tmux test` for this module's integration suite. The tests use deterministic providers, temporary state and isolated tmux servers; they do not call paid models or use the live workspace. Terminal tests use util-linux `script` on Linux and the system `script` on macOS, selecting arguments by platform. Other platforms fail explicitly.
+
+The macOS test helper passes input through a shell pipe because its `script` rejects the socket Node uses for child stdin. The helper preserves command arguments and child exit status without additional dependencies.

@@ -13,11 +13,22 @@ function run(program:string,args:string[],input?:string):Promise<string> {
 }
 const make=(...args:string[])=>run('make',['--no-print-directory',...args]);
 const tmux=(...args:string[])=>run('tmux',['-L',socket,...args]);
+function terminalCommand(command:string[]):[string,string[]] {
+  if(process.platform==='darwin') return ['/bin/sh',['-c','cat | exec script -qF /dev/null "$@"','philby-test',...command]];
+  if(process.platform==='linux') return ['script',['-qfec',command.map(arg=>`'${arg.replaceAll("'","'\\''")}'`).join(' '),'/dev/null']];
+  throw Error(`Terminal tests do not support ${process.platform}`);
+}
 async function until(fn:()=>Promise<boolean>) {for(let i=0;i<100;i++){if(await fn())return;await new Promise(r=>setTimeout(r,100));}throw Error('Timed out');}
 async function selector(title='Open a pane') {
   await until(async()=> (await tmux('capture-pane','-p','-t','philby:')).includes(title));
   return (await tmux('display-message','-p','-t','philby:','#{pane_id}')).trim();
 }
+test('terminal wrapper preserves literal arguments, supplies a TTY and propagates failure',async()=>{
+  const literal="spaces 'quotes' $HOME `literal` $(literal)";
+  const output=await run(...terminalCommand([process.execPath,'-e',"if(!process.stdin.isTTY) process.exit(2); process.stdout.write(process.argv[1])",literal]));
+  assert.ok(output.endsWith(literal),JSON.stringify(output));
+  await assert.rejects(run(...terminalCommand([process.execPath,'-e','process.exit(17)'])),/: 17\n/);
+});
 test('bare Make starts one selector without creating a pane and creates the first named pane on request',async()=>{
   const paneNames=()=>existsSync(env.PHILBY_PANES_DIR)?readdirSync(env.PHILBY_PANES_DIR):[];
   try {
@@ -53,7 +64,7 @@ test('pane selection, tmux inventory, terminal input, multiline sends, independe
     const workerTools=join(directory,'panes','worker');mkdirSync(workerTools,{recursive:true});
     writeFileSync(join(workerTools,'BOOT.md'),'Verify the configured workspace.');
     writeFileSync(join(workerTools,'Makefile'),'close:\n\t@echo closed >> closed\n');
-    terminal=spawn('script',['-qfec',`tmux -L ${socket} attach-session -t philby`,'/dev/null'],{env:{...env,TMUX:'',TERM:'xterm-256color'},stdio:['pipe','ignore','inherit']});
+    terminal=spawn(...terminalCommand(['tmux','-L',socket,'attach-session','-t','philby']),{env:{...env,TMUX:'',TERM:'xterm-256color'},stdio:['pipe','ignore','inherit']});
     await until(async()=> (await tmux('list-clients','-F','#{client_name}')).trim()!=='');
     terminal.stdin!.write('\x1b[1;5F');
     const naming=await selector();
@@ -307,7 +318,7 @@ test('plan controls preserve literal text and update the terminal from both comm
     const stdinPlan='1. Plan from stdin\n2. Preserve $HOME literally\n';
     await run('make',['--no-print-directory','pane-plan-set','slug=planner','ACTIVE=0','PLAN='],stdinPlan);
     assert.deepEqual(await status(),{active:false,plan:stdinPlan});
-    await run('script',['-qfec',`make --no-print-directory pane-plan-set slug=planner ACTIVE=0 PLAN= PROMPT_FILE=${file}`,'/dev/null']);
+    await run(...terminalCommand(['make','--no-print-directory','pane-plan-set','slug=planner','ACTIVE=0','PLAN=',`PROMPT_FILE=${file}`]));
     assert.deepEqual(await status(),{active:false,plan:approved});
     await make('pane-plan-set','slug=planner','ACTIVE=0',`PLAN=${approved}`);
     assert.deepEqual(await status(),{active:false,plan:approved});

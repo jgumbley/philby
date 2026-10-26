@@ -9,10 +9,10 @@ The kernel provides continuity, communication and control. Panes build small reu
 Use Node 22.19 or newer, npm, GNU Make, bash and tmux on Linux. Clone this repository, enter its directory, then:
 
 ```sh
-cp .env.example .env
+make provider-setup
 ```
 
-Set `OPENROUTER_API_KEY` in `.env`, or export it in your environment. Set `PI_MODEL_ID` to choose the default model for new panes; it defaults to `moonshotai/kimi-k3`. GLM 5.3 through OpenRouter uses `z-ai/glm-5.3`.
+Set `API_KEY` in the generated `openrouter.provider`. The generated `.env` selects `DEFAULT_MODEL=openrouter/moonshotai/kimi-k3` for new panes. Setup reports missing credentials; it does not log in or call a model.
 
 ```sh
 make deps
@@ -32,6 +32,26 @@ make quit
 Slugs are immutable and unique: 1–64 lowercase letters, digits or hyphens, beginning with an alphanumeric character. Opening a running pane focuses it; opening a closed pane resumes its conversation. `Ctrl-b d` detaches while work continues. `make quit` asks before closing all panes; `make cleanup` does the same cleanup without confirmation and retains state and tools.
 
 Use `PHILBY_DETACHED=1 make` to open without attaching. Terminal navigation, pane selection and workspace controls are documented in [tmux](tmux/README.md).
+
+## Providers
+
+Philby discovers root-level `*.provider` files in filename order. The filename identifies the provider: `openrouter.provider` supplies `openrouter`; `work.provider` supplies `work`. Each file uses dotenv syntax and is parsed independently as data, without shell execution or variable expansion. Provider files contain credentials and are ignored by Git; commit only credential-free `*.provider.example` templates.
+
+```dotenv
+TYPE=openrouter
+API_KEY=your-key
+MODELS=moonshotai/kimi-k3,z-ai/glm-5.2,z-ai/glm-5.3
+```
+
+`TYPE`, `API_KEY` and `MODELS` are required. Supported types are `openrouter` and `openai-compatible`; Codex sign-in is not implemented. Multiple provider files can use the same type with separate keys. Unsupported settings, types and model IDs fail explicitly. Provider loading uses the installed model catalog without network discovery.
+
+For an OpenAI-compatible gateway, copy `gateway.provider.example` to a named provider file. Set `BASE_URL` to the API prefix before `/chat/completions`, and `CATALOG` to the Pi catalog containing the exact IDs in `MODELS` (for example `anthropic`). Pi supplies model names, context/output limits and cost estimates; the estimates are not gateway billing rates. The adapter uses text chat and function tools, without provider-specific thinking controls. Unknown catalog entries fail instead of inventing limits. `make -C shared provider-models PROVIDER=name` lists the gateway's `/models` response using that file's credentials.
+
+`MODELS` is an ordered, comma-separated model picker list. OpenRouter's complete supported catalog remains available to saved selections and explicit consultation requests; gateways expose only the listed models. Labels and model metadata come from the installed library, with the existing DeepSeek October 17 metadata adjustment retained for OpenRouter. Explicit OpenRouter `:online` variants remain supported. Research requires OpenRouter's web tools and rejects gateway models.
+
+Root `.env` selects the default with `DEFAULT_MODEL=provider/model-id`. The first slash separates provider identity from the full model ID, so `openrouter/z-ai/glm-5.3` selects GLM 5.3. Changing the default affects new panes; existing panes retain their saved provider and model. Keep provider filenames stable: removing or renaming a saved pane's provider causes an explicit startup error without replacing its conversation. Close and reopen panes to load configuration changes.
+
+`make provider-setup` copies `.env.example` and `openrouter.provider.example` to their runtime filenames when missing. Existing files are left untouched. There is no automatic migration: put credentials in the provider file and use `DEFAULT_MODEL` in `.env`. `OPENROUTER_API_KEY` and `PI_MODEL_ID` are no longer runtime settings. Provider files are reread when panes start; restart Philby after changing instance settings.
 
 ## Instructions and tools
 
@@ -124,7 +144,7 @@ The tmux adapter builds with the core. Firefox has its own TypeScript build and 
 
 `shared/Makefile` retains `browser-*` and `wiki-*` entrypoints and delegates to the modules. Run `make -C shared help` to discover them. Graphwiki requires Rust, Cargo and `flock`; Firefox tools require Firefox and `flock`, with Sway needed for marked desktop windows. Each module documents its requirements.
 
-Shared `ask`, `reason` and `twitter` provide fresh consultations without local tools or pane context. Shared `research` searches and reads web pages using OpenRouter's web tools. They use `OPENROUTER_API_KEY` and the same prompt inputs. Override `ASK_MODEL`, `REASON_MODEL`, `TWITTER_MODEL` or `RESEARCH_MODEL` to select an exact model. Their defaults are `z-ai/glm-5.2`, `openai/gpt-5.5`, `x-ai/grok-4.3:online` and `openai/gpt-5.5`, respectively.
+Shared `ask`, `reason` and `twitter` provide fresh consultations without local tools or pane context. Shared `research` searches and reads web pages using OpenRouter's web tools. They share the instance provider configuration and the same prompt inputs. Override `ASK_MODEL`, `REASON_MODEL`, `TWITTER_MODEL` or `RESEARCH_MODEL` in root `.env` or the command environment using `provider/model-id`. Their defaults are `openrouter/z-ai/glm-5.2`, `openrouter/openai/gpt-5.5`, `openrouter/x-ai/grok-4.3:online` and `openrouter/openai/gpt-5.5`, respectively. Research uses the selected provider's key and OpenRouter web tools; omit `:online` from its model reference. Ordinary consultations retain explicit `:online` support.
 
 ## State and verification
 
@@ -146,7 +166,7 @@ make -C shared/firefox check test
 make -C shared/graphwiki check test
 ```
 
-Core checks need no browser or Rust toolchain. `make check-all test-all` runs the aggregate checks and suites. Existing tests cover persistence, message delivery, memory, instructions, recovery, pane recipes and module behaviour. Terminal tests also require util-linux `script`. Pane-specific workflows are verified through their own Make targets. `make ingest` copies the tracked digest using the optional Wayland `wl-copy` command.
+Core checks need no browser or Rust toolchain. `make check-all test-all` runs the aggregate checks and suites. Existing tests cover persistence, message delivery, memory, instructions, recovery, pane recipes and module behaviour. Terminal tests require util-linux `script` on Linux or the system `script` on macOS. Pane-specific workflows are verified through their own Make targets. `make ingest` copies the tracked digest using the optional Wayland `wl-copy` command.
 
 ## License
 

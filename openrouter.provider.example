@@ -1,0 +1,3 @@
+TYPE=openrouter
+API_KEY=
+MODELS=moonshotai/kimi-k3,z-ai/glm-5.2,z-ai/glm-5.3,z-ai/glm-5.3-flash,deepseek/deepseek-v4-pro-0813,deepseek/deepseek-v4.1-flash,deepseek/deepseek-v4.1-flash-1017,minimax/minimax-m3

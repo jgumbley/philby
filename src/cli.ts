@@ -5,6 +5,7 @@ import { root, panesRoot, slug, Store, envelope, locked, lock, configured, paneT
 import { migrateMailboxes } from './mailboxes.js';
 import { request, running } from './ipc.js';
 import { models } from './models.js';
+import { consultationDefaults } from './providers.js';
 import { Pane, capture, ctx } from './pane.js';
 import { selectPane, startTui } from './tui.js';
 import { openPane, openSelector, listViews, openShell, stopServer } from '../tmux/index.js';
@@ -69,9 +70,9 @@ async function main() {
   if(command==='window') return openShell();
   if(command==='consult') {
     const route=process.env.ROUTE || 'ask';
-    const defaults:Record<string,string>={ask:'z-ai/glm-5.2',reason:'openai/gpt-5.5',twitter:'x-ai/grok-4.3:online'};
-    if(!Object.hasOwn(defaults,route)) throw Error(`Unknown consultation route: ${route}`);
-    const id=(process.env[route.toUpperCase()+'_MODEL'] || defaults[route]).replace(/^openrouter\//,'');
+    const defaults:Record<string,string>=consultationDefaults;
+    if(!['ask','reason','twitter'].includes(route)) throw Error(`Unknown consultation route: ${route}`);
+    const id=process.env[route.toUpperCase()+'_MODEL'] || defaults[route];
     const config=await models(id);
     const {MemoryStorage}=await import('@earendil-works/pi-durable');
     const harness=await Harness.open(new MemoryStorage(),{models:config.models,registry:createRegistry()},ctx);

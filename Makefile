@@ -5,10 +5,10 @@ ifneq ($(origin prompt),undefined)
 export PROMPT := $(value prompt)
 endif
 export PROMPT
-override export PLAN := $(value PLAN)
+override PLAN := $(value PLAN)
+export PLAN
 export PROMPT_FILE slug from REQUEST_ID MODE FIELD ID PAUSED MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
-export ASK_MODEL REASON_MODEL RESEARCH_MODEL TWITTER_MODEL
-.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason research twitter
+.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason research twitter provider-setup
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -49,11 +49,14 @@ test-all: test
 	@$(MAKE) --no-print-directory -C tmux test
 	@$(MAKE) --no-print-directory -C shared/firefox test
 	@$(MAKE) --no-print-directory -C shared/graphwiki test
+provider-setup:
+	@$(MAKE) --no-print-directory -C shared provider-setup
 research:
 	@$(MAKE) --no-print-directory -f shared/Makefile research
 ask reason twitter: build
 	@$(MAKE) --no-print-directory -C shared $@
 help:
+	@echo 'provider-setup — create root .env and *.provider configuration; retain existing files and report missing credentials'
 	@echo 'make — create/open pane chooser; make pane slug=<slug> [TYPE=plain|graphwiki] — create or resume'
 	@echo 'pane-new — select a saved pane or New pane; pane-list — saved agents and every live tmux view'
 	@echo 'pane-close pane-stop pane-send pane-capture pane-list pane-memory pane-checks'

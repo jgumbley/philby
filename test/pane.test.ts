@@ -35,6 +35,21 @@ test('model picker retains a current model outside its presets',async()=>{
     assert.deepEqual((await request('model-custom',{op:'model',...current})).current,current);
   }finally{await p.close();}
 });
+test('a missing saved provider fails without replacing the conversation or retaining its lock',async()=>{
+  const configured=fixture();
+  const p=await Pane.open('missing-provider',configured.models,model);
+  const id=p.conversation.id;
+  await p.operation({op:'memory',field:'notes',content:'Keep the saved provider selection'});
+  await p.close();
+  const empty=createModels();
+  await assert.rejects(Pane.open('missing-provider',empty,{provider:'replacement',modelId:'other'}),/Saved model unavailable: test\/test/);
+  const reopened=await Pane.open('missing-provider',configured.models,model);
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Keep the saved provider selection');
+  }finally{await reopened.close();}
+});
 test('model switching preserves running tools, queued input, memory and the saved conversation',async()=>{
   const effect=join(directory,'model-effect'),release=join(directory,'model-release');
   const alternate={provider:'test',modelId:'test-alternate'};
