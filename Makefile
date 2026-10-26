@@ -43,11 +43,11 @@ test: build
 	@npm test
 	$(success)
 check-all: check
-	@$(MAKE) --no-print-directory -C shared/firefox check
+	@$(MAKE) --no-print-directory -C shared/browser check
 	@$(MAKE) --no-print-directory -C shared/graphwiki check
 test-all: test
 	@$(MAKE) --no-print-directory -C tmux test
-	@$(MAKE) --no-print-directory -C shared/firefox test
+	@$(MAKE) --no-print-directory -C shared/browser test
 	@$(MAKE) --no-print-directory -C shared/graphwiki test
 provider-setup:
 	@$(MAKE) --no-print-directory -C shared provider-setup
@@ -71,7 +71,7 @@ help:
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'
 	@echo 'digest — print all Git-tracked files; ingest — copy that digest to the Wayland clipboard'
 	@echo 'quit — close all Philby panes after y/n confirmation; /quit works inside any agent pane'
-	@echo 'Firefox tools: make -C shared help (browser-tabs, browser-eval, browser-click and more)'
+	@echo 'Browser tools: make -C shared help (browser-status, browser-tabs, browser-run; BROWSER=chrome|firefox)'
 	@echo 'Wiki tools: make -C shared help (wiki-context, wiki-publish, wiki-index, wiki-lint)'
 	@echo 'migrate-mailboxes — move pending legacy outboxes into receiving pane mailboxes; close all panes first'
 	@echo 'Legacy state: make -C shared migrate-state after closing old panes'

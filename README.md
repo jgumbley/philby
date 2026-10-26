@@ -6,7 +6,7 @@ The kernel provides continuity, communication and control. Panes build small reu
 
 ## Start
 
-Use Node 22.19 or newer, npm, GNU Make, bash and tmux on Linux. Clone this repository, enter its directory, then run:
+Use Node 22.19 or newer, npm, GNU Make, bash and tmux on macOS or Linux. Clone this repository, enter its directory, then run:
 
 ```sh
 make provider-setup
@@ -147,12 +147,14 @@ Choose `intervalMs` (an integer of at least 1000) or `daily` (`HH:mm`), with an 
 | --- | --- | --- |
 | `src/`, `test/` | Conversations, memory, mailboxes, reviews, CLI and TUI | This README |
 | `tmux/` | Workspace adapter, configuration and terminal integration tests | [tmux](tmux/README.md) |
-| `shared/firefox/` | Browser tools, build and integration tests | [Firefox](shared/firefox/README.md) |
+| `shared/browser/` | Puppeteer tools for existing Chrome and Firefox sessions | [Browser](shared/browser/README.md) |
 | `shared/graphwiki/` | Graph operations, command wrapper and Rust tests | [Graphwiki](shared/graphwiki/README.md) |
 
-The tmux adapter builds with the core. Firefox has its own TypeScript build and reuses the root npm dependencies. Graphwiki owns its Cargo lockfile. Plain panes do not require Firefox or Rust.
+The tmux adapter builds with the core. Browser tools have their own TypeScript build and reuse the root npm dependencies, including pinned `puppeteer-core`. Graphwiki owns its Cargo lockfile. Plain panes do not require a browser or Rust.
 
-`shared/Makefile` retains `browser-*` and `wiki-*` entrypoints and delegates to the modules. Run `make -C shared help` to discover them. Graphwiki requires Rust, Cargo and `flock`; Firefox tools require Firefox and `flock`, with Sway needed for marked desktop windows. Each module documents its requirements.
+`shared/Makefile` exposes `browser-connect`, `browser-disconnect`, `browser-status`, `browser-tabs` and `browser-run`, plus the `wiki-*` tools. Run `make -C shared help` to discover them. Browser tools require `BROWSER=chrome|firefox` and an existing browser prepared for remote control. `browser-connect` opens a dedicated tmux service pane that owns one persistent Puppeteer connection; Chrome approval is needed when that connection starts. Later commands reuse it, preserving the browser's profile. `browser-run` executes a standard Puppeteer async function body supplied through a prompt file, `prompt`, or stdin. See the [browser setup and examples](shared/browser/README.md). Graphwiki requires Rust, Cargo and `flock`.
+
+The browser service survives detaching and closing ordinary agent panes while idle. `browser-disconnect`, closing its service pane, or workspace cleanup stops it while leaving the browser and tabs open. A per-user lock prevents another workspace from controlling the same browser. Browser operations queue; status bypasses the queue. Cancelling an active request stops the service and fails pending requests. Services never start implicitly, time out while idle, restart automatically or replay scripts.
 
 Shared `ask`, `reason` and `twitter` provide fresh consultations without local tools or pane context. Shared `research` searches and reads web pages using OpenRouter's web tools. They share the instance provider configuration and the same prompt inputs. Override `ASK_MODEL`, `REASON_MODEL`, `TWITTER_MODEL` or `RESEARCH_MODEL` in root `.env` or the command environment using `provider/model-id`. Their defaults are `openrouter/z-ai/glm-5.2`, `openrouter/openai/gpt-5.5`, `openrouter/x-ai/grok-4.3:online` and `openrouter/openai/gpt-5.5`, respectively. Research uses the selected provider's key and OpenRouter web tools; omit `:online` from its model reference. Ordinary consultations retain explicit `:online` support.
 
@@ -172,11 +174,13 @@ make digest
 make check
 make test
 make -C tmux test
-make -C shared/firefox check test
+make -C shared/browser check test
 make -C shared/graphwiki check test
 ```
 
 Core checks need no browser or Rust toolchain. `make check-all test-all` runs the aggregate checks and suites. Existing tests cover persistence, message delivery, memory, instructions, recovery, pane recipes and module behaviour. Terminal tests require util-linux `script` on Linux or the system `script` on macOS. Pane-specific workflows are verified through their own Make targets. `make ingest` copies the tracked digest using the optional Wayland `wl-copy` command.
+
+The replacement browser module's Linux verification is pending a separate session; [linux.txt](linux.txt) records the checks to run and results to collect.
 
 ## License
 

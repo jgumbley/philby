@@ -1,0 +1,114 @@
+Linux browser verification: PENDING
+
+The persistent shared/browser service has not been tested on Linux yet.
+Complete this in a separate Linux session. Do not treat macOS results or
+deterministic module tests as Linux desktop verification.
+
+Record distribution, display server, Node, GNU Make, Chrome and Firefox
+versions, the revision tested, command exit status and a short result.
+Do not record credentials, cookies, private page content or conversation logs.
+
+1. Repository and module checks, from the repository root:
+
+   make deps
+   make help
+   make -C shared help
+   make -C shared/browser check test
+   make check-all test-all
+
+   Report missing prerequisites and failed targets explicitly. Graphwiki still
+   requires Rust, Cargo and flock; the browser module does not require flock.
+
+2. Prepare the regular browsers as documented in shared/browser/README.md.
+   Chrome 144+: enable remote debugging in chrome://inspect/#remote-debugging.
+   Firefox: quit normally and start the same application/profile with
+   --remote-debugging-port 9222. Do not copy profiles or export credentials.
+
+3. From the current Philby workspace, inspect status before connecting.
+   With no service, it must fail with a connection instruction without starting
+   or prompting the browser. With a service, it must report its current state.
+   Then connect explicitly and run diagnostics for both browsers:
+
+   make -C shared browser-status BROWSER=chrome
+   make -C shared browser-status BROWSER=firefox
+   make -C shared browser-connect BROWSER=chrome
+   make -C shared browser-connect BROWSER=firefox
+   make -C shared browser-status BROWSER=chrome
+   make -C shared browser-tabs BROWSER=chrome
+   make -C shared browser-status BROWSER=firefox
+   make -C shared browser-tabs BROWSER=firefox
+
+   Confirm the intended existing profile and pages are visible. Keep tab
+   listings private when they contain private URLs or titles. Confirm one
+   dedicated service pane exists per browser and connecting again focuses
+   that pane. Chrome should ask once when the service connects; subsequent
+   status, tabs and run commands must reuse the same approved connection.
+
+4. Run the following disposable-page check once with BROWSER=chrome and once
+   with BROWSER=firefox. It exercises the default connection, a field fill,
+   a click and result extraction without interacting with an account.
+
+make -C shared browser-run BROWSER=chrome <<'JS'
+const tab = await browser.newPage();
+try {
+  await tab.setContent('<title>Philby browser check</title><input aria-label="value"><button onclick="document.title=document.querySelector(\'input\').value">Apply</button>');
+  await tab.locator('input').fill('Philby verified');
+  await tab.locator('button').click();
+  await tab.waitForFunction(() => document.title === 'Philby verified');
+  return {ok: true};
+} finally {
+  await tab.close();
+}
+JS
+
+5. For each browser, open an ordinary disposable page at example.com. Check
+   the remaining public input paths and TAB selection:
+
+   make -C shared browser-run BROWSER=chrome TAB=example.com prompt='return await page.title();'
+   make -C shared browser-run BROWSER=firefox TAB=example.com prompt='return await page.title();'
+   make -C shared browser-run BROWSER=chrome TAB=example.com PROMPT_FILE=/absolute/path/read-page.js
+   make -C shared browser-run BROWSER=firefox TAB=example.com PROMPT_FILE=/absolute/path/read-page.js
+
+   Put "return await page.title();" in read-page.js. Confirm unmatched and
+   ambiguous TAB selectors return nonzero. Check a screenshot of only the
+   disposable page using page.screenshot() through browser-run. Confirm two
+   simultaneous invocations for the same browser run sequentially over the
+   existing connection. During an awaited script, browser-status must return
+   immediately with the busy caller and queued count.
+
+6. Check service ownership and lifetime in a disposable Philby workspace.
+   Detach and reattach; close an ordinary agent pane while idle. Confirm the
+   browser service stays connected and no new Chrome approval is needed. A second
+   workspace must fail to take ownership of the same browser while that
+   service holds its lifetime lock. Closing the service pane or running
+   workspace cleanup must stop the service without closing the browser.
+
+   A normal awaited script error must leave the service usable. Cancelling a
+   queued request must remove only that request. Cancelling an active request,
+   losing its client or exceeding its deadline must stop the service and fail
+   pending requests. Use only disposable pages for these checks. Confirm the
+   service never restarts or replays work automatically; reconnect explicitly
+   with browser-connect before continuing. Scripts must await all work and
+   leave no background timers or unawaited operations.
+
+7. Disconnect explicitly and inspect the result:
+
+   make -C shared browser-disconnect BROWSER=chrome
+   make -C shared browser-disconnect BROWSER=firefox
+   make -C shared browser-status BROWSER=chrome
+   make -C shared browser-status BROWSER=firefox
+
+   Confirm visually that pre-existing tabs remain and previously signed-in
+   sites are still signed in after commands complete. Record only pass/fail;
+   do not print credentials, cookies, storage values or account identifiers.
+   Confirm commands fail visibly when the selected browser is unavailable
+   and do not launch or switch to another browser.
+
+Results:
+  Linux automated checks: pending
+  Chrome live session: pending
+  Firefox live session: pending
+  Persistent connection and single Chrome approval: pending
+  Pane lifetime and cross-workspace ownership: pending
+  Existing tabs and login state preserved: pending
+  Failure and concurrency behavior: pending

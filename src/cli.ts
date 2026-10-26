@@ -8,7 +8,7 @@ import { models } from './models.js';
 import { consultationDefaults } from './providers.js';
 import { Pane, capture, ctx } from './pane.js';
 import { selectPane, startTui } from './tui.js';
-import { openPane, openSelector, listViews, openShell, stopServer } from '../tmux/index.js';
+import { openPane, openSelector, listViews, openShell, closeBrowsers, stopServer } from '../tmux/index.js';
 import { Harness, createRegistry } from '@earendil-works/pi-durable';
 import { createModels } from '@earendil-works/pi-ai';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
@@ -37,6 +37,7 @@ async function cleanup(current?:Pane) {
   for(let i=0;i<300 && others().some(locked);i++) await sleep(100);
   if(others().some(locked)) throw Error('Cleanup timed out waiting for graceful pane closure');
   await current?.close();
+  await closeBrowsers();
   stopServer();
 }
 async function main() {
