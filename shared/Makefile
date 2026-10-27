@@ -15,6 +15,9 @@ override export BROWSER_ENDPOINT := $(value BROWSER_ENDPOINT)
 override export TAB := $(value TAB)
 override export GRAPH_ROOT := $(value GRAPH_ROOT)
 override export CHANGE := $(value CHANGE)
+override INPUT := $(value INPUT)
+override OUTPUT := $(value OUTPUT)
+export INPUT OUTPUT
 BROWSER_TOOLS := browser-connect browser-disconnect browser-status browser-tabs browser-run
 WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-viewer-start wiki-viewer-stop wiki-viewer-status wiki-viewer-doctor wiki-viewer-install wiki-viewer-capture wiki-browse
 export VIEWER_PORT
@@ -36,6 +39,9 @@ help:
 	@echo 'BROWSER_ENDPOINT=ws://... or wss://... overrides Chrome channel discovery / Firefox localhost:9222/session'
 	@echo 'Calls share the pane connection and serialize. Status shows the busy caller and queue. Scripts are never replayed.'
 	@echo 'browser-check / browser-test — validate shared/browser; setup and examples: shared/browser/README.md'
+	@echo 'ocr INPUT=local.pdf|png|jpg|jpeg [OUTPUT=new.txt] — local English text extraction with Scribe.js'
+	@echo 'ocr-diagnose / ocr-check / ocr-test — check dependencies / syntax / temporary document tests'
+	@echo 'OCR prints text with form-feed page separators; OUTPUT saves without overwriting; shared/ocr/README.md'
 	@echo 'Wiki: GRAPH_ROOT=existing graph directory; wiki-context uses PROMPT_FILE, prompt, or stdin'
 	@echo 'wiki-publish CHANGE=stable-change-id; wiki-index; wiki-lint; commands serialize per graph'
 	@echo 'wiki-viewer-install / wiki-viewer-doctor; wiki-viewer-start / wiki-viewer-stop / wiki-viewer-status GRAPH_ROOT=path [VIEWER_PORT=8080]'
@@ -56,6 +62,12 @@ ask reason twitter:
 	@ROUTE=$@ node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" consult
 $(BROWSER_TOOLS) browser-check browser-test:
 	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/browser/Makefile" $(@:browser-%=%)
+.PHONY: ocr ocr-diagnose ocr-check ocr-test
+ocr ocr-diagnose ocr-check ocr-test: override MAKEOVERRIDES :=
+ocr:
+	@$(MAKE) --no-print-directory -s -f "$(ROOT)/shared/ocr/Makefile" run
+ocr-diagnose ocr-check ocr-test:
+	@$(MAKE) --no-print-directory -s -f "$(ROOT)/shared/ocr/Makefile" $(@:ocr-%=%)
 $(WIKI_TOOLS):
 	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/graphwiki/Makefile" $@
 wiki-check:

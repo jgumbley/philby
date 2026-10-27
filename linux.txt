@@ -112,3 +112,66 @@ Results:
   Pane lifetime and cross-workspace ownership: pending
   Existing tabs and login state preserved: pending
   Failure and concurrency behavior: pending
+
+Linux OCR verification: PENDING
+
+The direct shared/ocr tool has not been tested on Linux yet. Complete this in
+a separate Linux session. Record distribution, architecture, Node and GNU
+Make versions, the revision tested, exit statuses and short results. Use
+public or disposable fixtures; do not record private document text.
+
+1. Install pinned dependencies and run discovery, diagnostics and checks:
+
+   make deps
+   make -C shared help
+   make -C shared ocr-diagnose
+   make -C shared ocr-check ocr-test
+   make check-all test-all
+
+   Confirm the diagnostic identifies the platform/runtime, imports the native
+   canvas dependency and finds the pinned local English model assets. Report
+   missing prerequisites and failed targets explicitly. Diagnostics do not
+   establish OCR accuracy.
+
+2. Run OCR on complete local fixtures with known English text:
+
+   make -C shared ocr INPUT=/absolute/path/screenshot.png
+   make -C shared ocr INPUT=/absolute/path/screenshot.jpg
+   make -C shared ocr INPUT=/absolute/path/native-text.pdf
+   make -C shared ocr INPUT=/absolute/path/scanned.pdf
+   make -C shared ocr INPUT=/absolute/path/mixed-pages.pdf
+
+   Confirm text from native and scanned pages is present in page order.
+   Include repeated lines and a blank page; both must be retained. Text page
+   separators are newline, form feed and newline. Existing invisible OCR is
+   reprocessed by default. Small embedded images inside native-text pages
+   are outside the supported extraction scope.
+
+3. Check output creation and explicit failures:
+
+   make -C shared ocr INPUT=/absolute/path/scanned.pdf OUTPUT=/absolute/path/new-text.txt
+
+   Run the same command again; it must fail without changing new-text.txt.
+   Check a missing input, unsupported extension and malformed supported file;
+   each must return nonzero. Check paths containing spaces using quoted Make
+   arguments. Confirm successful and failed processes exit after cleanup.
+
+4. After make deps, repeat recognition with networking unavailable. Confirm
+   it uses installed English assets without model downloads. Confirm no
+   traineddata cache is left in the caller's directory and temporary scratch
+   directories are removed after successful and failed commands. The tool
+   should run directly, with no daemon, tmux pane or socket.
+
+5. Exercise the browser-to-file workflow using a disposable public page.
+   Capture a screenshot or finish the application's PDF download/export via
+   the existing browser-run tool, then pass the completed local file to ocr.
+   Record the result without private URLs, document content or credentials.
+
+OCR results:
+  Linux dependency diagnostic: pending
+  Linux automated checks: pending
+  PNG/JPEG and native/scanned/mixed PDF extraction: pending
+  Page boundaries, blank pages and repeated lines: pending
+  Exclusive output and invalid-input failures: pending
+  Local model assets and scratch cleanup: pending
+  Browser-to-local-file workflow: pending

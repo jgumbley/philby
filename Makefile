@@ -44,10 +44,12 @@ test: build
 	$(success)
 check-all: check
 	@$(MAKE) --no-print-directory -C shared/browser check
+	@$(MAKE) --no-print-directory -C shared/ocr check
 	@$(MAKE) --no-print-directory -C shared/graphwiki check
 test-all: test
 	@$(MAKE) --no-print-directory -C tmux test
 	@$(MAKE) --no-print-directory -C shared/browser test
+	@$(MAKE) --no-print-directory -C shared/ocr test
 	@$(MAKE) --no-print-directory -C shared/graphwiki test
 provider-setup:
 	@$(MAKE) --no-print-directory -C shared provider-setup
@@ -72,6 +74,7 @@ help:
 	@echo 'digest — print all Git-tracked files; ingest — copy that digest to the Wayland clipboard'
 	@echo 'quit — close all Philby panes after y/n confirmation; /quit works inside any agent pane'
 	@echo 'Browser tools: make -C shared help (browser-status, browser-tabs, browser-run; BROWSER=chrome|firefox)'
+	@echo 'OCR: make -C shared ocr INPUT=/path/document.pdf [OUTPUT=/path/new.txt]; ocr-diagnose'
 	@echo 'Wiki tools: make -C shared help (wiki-context, wiki-publish, wiki-index, wiki-lint)'
 	@echo 'migrate-mailboxes — move pending legacy outboxes into receiving pane mailboxes; close all panes first'
 	@echo 'Legacy state: make -C shared migrate-state after closing old panes'
