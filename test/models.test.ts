@@ -31,7 +31,7 @@ test('provider files preserve exact catalog models, menu order, defaults and onl
   assert.deepEqual(model.input,['text','image']);
   assert.deepEqual(model.cost,{input:0.15,output:0.6,cacheRead:0.003,cacheWrite:0});
   assert.deepEqual(consultationDefaults,{
-    ask:'openrouter/z-ai/glm-5.2',reason:'openrouter/openai/gpt-5.5',research:'openrouter/openai/gpt-5.5',twitter:'openrouter/x-ai/grok-4.3:online',
+    ask:'openrouter/z-ai/glm-5.2',reason:'openrouter/openai/gpt-5.5',twitter:'openrouter/x-ai/grok-4.3:online',
   });
   for(const reference of Object.values(consultationDefaults)) assert.ok(await models(reference,options));
   await assert.rejects(models('openrouter/missing-model',options),/unavailable/);

@@ -10,7 +10,6 @@ export type ProviderConfig = {id:string;apiKey:string;models:string[];file:strin
 export const consultationDefaults = {
   ask:'openrouter/z-ai/glm-5.2',
   reason:'openrouter/openai/gpt-5.5',
-  research:'openrouter/openai/gpt-5.5',
   twitter:'openrouter/x-ai/grok-4.3:online',
 };
 export function modelReference(reference:string|undefined) {

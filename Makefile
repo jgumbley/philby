@@ -8,7 +8,7 @@ export PROMPT
 override PLAN := $(value PLAN)
 export PLAN
 export PROMPT_FILE slug from REQUEST_ID MODE FIELD ID PAUSED MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
-.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason research twitter provider-setup
+.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason twitter provider-setup
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -53,8 +53,6 @@ test-all: test
 	@$(MAKE) --no-print-directory -C shared/graphwiki test
 provider-setup:
 	@$(MAKE) --no-print-directory -C shared provider-setup
-research:
-	@$(MAKE) --no-print-directory -f shared/Makefile research
 ask reason twitter: build
 	@$(MAKE) --no-print-directory -C shared $@
 help:
@@ -69,7 +67,7 @@ help:
 	@echo 'Plan mode: pane-plan shows status; pane-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'
 	@echo 'New session: pane-new-session starts a fresh transcript, preserving files, tools, memory and archived history'
 	@echo 'pane-capture ALL=1 — include archived entries from before /new in chronological order'
-	@echo 'window deps build check test digest ingest cleanup; shared: ask reason research twitter'
+	@echo 'window deps build check test digest ingest cleanup; shared: ask reason twitter'
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'
 	@echo 'digest — print all Git-tracked files; ingest — copy that digest to the Wayland clipboard'
 	@echo 'quit — close all Philby panes after y/n confirmation; /quit works inside any agent pane'

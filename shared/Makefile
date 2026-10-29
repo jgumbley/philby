@@ -21,15 +21,13 @@ export INPUT OUTPUT
 BROWSER_TOOLS := browser-connect browser-disconnect browser-status browser-tabs browser-run
 WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-viewer-start wiki-viewer-stop wiki-viewer-status wiki-viewer-doctor wiki-viewer-install wiki-viewer-capture wiki-browse
 export VIEWER_PORT
-.PHONY: help processes ask reason research twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test pane-repo-inspect pane-repo-init pane-repo-verify repo-views prompt-audit migrate-state provider-setup
+.PHONY: help processes ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test pane-repo-inspect pane-repo-init pane-repo-verify repo-views prompt-audit migrate-state provider-setup
 help:
 	@echo 'provider-models PROVIDER=name — list gateway model metadata using the root name.provider credentials'
 	@echo 'provider-setup — copy missing .env and openrouter.provider examples; leave existing files untouched'
 	@echo 'processes — current-user process tree with elapsed and CPU time; excludes arguments'
 	@echo 'ask reason twitter — fresh independent consultations, no local tools or pane context'
-	@echo 'research — tactical web lookup: search, read pages/PDFs, and return a concise practical answer'
 	@echo 'PROMPT_FILE (absolute or relative to current directory), prompt, or stdin; override *_MODEL'
-	@echo 'Research uses OpenRouter web tools, up to six calls and two minutes; RESEARCH_MODEL=openrouter/openai/gpt-5.5'
 	@echo 'Browser: BROWSER=chrome|firefox is required; connect to an existing browser, never launch one'
 	@echo 'browser-connect / browser-disconnect — open or stop the persistent browser service pane'
 	@echo 'browser-status — check connection; browser-tabs — list page URLs and titles'
@@ -54,9 +52,6 @@ help:
 	@echo 'migrate-state — move legacy state into pane directories and remove the old coordinator; close old panes first'
 processes:
 	@ps -u "$$(id -u)" -o pid,ppid,stat,etime,time,comm --forest
-research:
-	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build >&2
-	@node "$(ROOT)/shared/research.mjs"
 ask reason twitter:
 	@$(MAKE) --no-print-directory -C "$(ROOT)" build
 	@ROUTE=$@ node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" consult
