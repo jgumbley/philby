@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import { root, panesRoot, runtimeDir, prepare } from '../src/store.js';
 import { running } from '../src/ipc.js';
+import { installKittyNavigation } from './kitty.js';
+import { withTmuxPassthrough } from './kitty-route.js';
 
 export { root, panesRoot, runtimeDir };
 type BrowserName = 'chrome' | 'firefox';
@@ -40,6 +42,10 @@ function openingLock() {
 async function attach(name:string) {
   if(process.stdin.isTTY && process.env.PHILBY_DETACHED!=='1') {
     if(process.env.TMUX?.split(',')[0]===tmux(['display-message','-p','#{socket_path}']).stdout.trim()) return;
+    if(process.platform==='darwin' && process.env.KITTY_WINDOW_ID) {
+      if(!process.stdout.isTTY) throw Error('Kitty navigation requires terminal output; stdout is redirected');
+      await withTmuxPassthrough(depth=>installKittyNavigation(process.stdin,process.stdout,depth));
+    }
     const child=spawn('tmux',['-L',server(),'attach-session','-t','philby'],{stdio:'inherit'});
     await new Promise<void>((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error(`tmux exited ${code}`)));});
   } else console.log(name);

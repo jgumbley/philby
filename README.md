@@ -33,6 +33,8 @@ Slugs are immutable and unique: 1–64 lowercase letters, digits or hyphens, beg
 
 Use `PHILBY_DETACHED=1 make` to open without attaching. Terminal navigation, pane selection and workspace controls are documented in [tmux](tmux/README.md).
 
+In Kitty on macOS, startup installs Cmd-Option-Right to move forward or open the pane selector, and Cmd-Option-Left to move back. Enable `allow_remote_control yes` in Kitty. Linux uses Ctrl-End and Ctrl-Home.
+
 ## Providers
 
 Philby discovers root-level `*.provider` files in filename order. The filename identifies the provider: `openrouter.provider` supplies `openrouter`; `work.provider` supplies `work`. Each file uses dotenv syntax and is parsed independently as data, without shell execution or variable expansion. Provider files contain credentials and are ignored by Git; commit only credential-free `*.provider.example` templates.
@@ -43,15 +45,27 @@ API_KEY=your-key
 MODELS=moonshotai/kimi-k3,z-ai/glm-5.2,z-ai/glm-5.3
 ```
 
-`TYPE`, `API_KEY` and `MODELS` are required. Supported types are `openrouter` and `openai-compatible`; Codex sign-in is not implemented. Multiple provider files can use the same type with separate keys. Unsupported settings, types and model IDs fail explicitly. Provider loading uses the installed model catalog without network discovery.
+`TYPE` and `MODELS` are required. Supported types are `openrouter`, `openai-compatible` and `openai`. OpenRouter and compatible gateways require `API_KEY`; native OpenAI uses `AUTH=oauth` for ChatGPT sign-in. OpenRouter and gateway files can use separate credentials. Native OpenAI uses the fixed filename `openai.provider` and Pi's `openai` identity. Unsupported settings, types and model IDs fail explicitly. Provider loading uses the installed model catalog without network discovery.
+
+For ChatGPT subscription access, copy `openai.provider.example` to `openai.provider`, choose models available to your account, then run:
+
+```sh
+make -C shared provider-login PROVIDER=openai
+```
+
+The helper requires an interactive terminal and prints a browser sign-in link. Complete the browser flow; Pi receives the local callback, or accepts the final redirect URL at the prompt. It uses Pi's native OpenAI provider and public Responses API, with Philby identified as the application. This keeps the existing Philby conversation, tools and memory. No Codex CLI or existing Codex credential import is involved. The login target exists only in `shared/Makefile`.
+
+OAuth credentials and the installation identifier are stored in root `.state/providers.sqlite`, ignored by Git and restricted to the current user. All panes in this installation share this credential store. Pi refreshes tokens through serialized SQLite transactions; refresh failures surface and retain the saved credential. Missing OAuth credentials never select an API key from the environment. Re-run the login helper to reconnect an account. Cleanup retains the credentials.
+
+After adding or editing a provider file, close and reopen the pane, then use `/model` to select a model under `openai`. To make it the default for new panes, set `DEFAULT_MODEL=openai/gpt-5.5` in root `.env`. A saved selection remains unchanged. The configured model list is a local catalogue, not a guarantee of account access; the service verifies access on inference.
 
 For an OpenAI-compatible gateway, copy `gateway.provider.example` to a named provider file. Set `BASE_URL` to the API prefix before `/chat/completions`, and `CATALOG` to the Pi catalog containing the exact IDs in `MODELS` (for example `anthropic`). Pi supplies model names, context/output limits and cost estimates; the estimates are not gateway billing rates. The adapter uses text chat and function tools, without provider-specific thinking controls. Unknown catalog entries fail instead of inventing limits. `make -C shared provider-models PROVIDER=name` lists the gateway's `/models` response using that file's credentials.
 
-`MODELS` is an ordered, comma-separated model picker list. OpenRouter's complete supported catalog remains available to saved selections and explicit consultation requests; gateways expose only the listed models. Labels and model metadata come from the installed library, with the existing DeepSeek October 17 metadata adjustment retained for OpenRouter. Explicit OpenRouter `:online` variants remain supported.
+`MODELS` is an ordered, comma-separated model picker list. OpenRouter's complete supported catalog remains available to saved selections and explicit consultation requests; gateways and ChatGPT connections expose only the listed models. Labels and model metadata come from the installed library, with the existing DeepSeek October 17 metadata adjustment retained for OpenRouter. Explicit OpenRouter `:online` variants remain supported.
 
 Root `.env` selects the default with `DEFAULT_MODEL=provider/model-id`. The first slash separates provider identity from the full model ID, so `openrouter/z-ai/glm-5.3` selects GLM 5.3. Changing the default affects new panes; existing panes retain their saved provider and model. Keep provider filenames stable: removing or renaming a saved pane's provider causes an explicit startup error without replacing its conversation. Close and reopen panes to load configuration changes.
 
-`make provider-setup` copies `.env.example` and `openrouter.provider.example` to their runtime filenames when missing. Existing files are left untouched. There is no automatic migration: put credentials in the provider file and use `DEFAULT_MODEL` in `.env`. `OPENROUTER_API_KEY` and `PI_MODEL_ID` are no longer runtime settings. Provider files are reread when panes start; restart Philby after changing instance settings.
+`make provider-setup` copies `.env.example` and `openrouter.provider.example` to their runtime filenames when missing. Existing files are left untouched. There is no automatic migration: put API keys in the provider file, use the shared login helper for OAuth, and set `DEFAULT_MODEL` in `.env`. `OPENROUTER_API_KEY` and `PI_MODEL_ID` are no longer runtime settings. Provider files are reread when panes start; restart Philby after changing instance settings.
 
 ## Instructions and tools
 
@@ -149,9 +163,10 @@ Choose `intervalMs` (an integer of at least 1000) or `daily` (`HH:mm`), with an 
 | `tmux/` | Workspace adapter, configuration and terminal integration tests | [tmux](tmux/README.md) |
 | `shared/browser/` | Puppeteer tools for existing Chrome and Firefox sessions | [Browser](shared/browser/README.md) |
 | `shared/ocr/` | Local English text extraction from screenshots and PDFs | [OCR](shared/ocr/README.md) |
+| `shared/slides/` | Local PPTX generation with PptxGenJS | [Slides](shared/slides/README.md) |
 | `shared/graphwiki/` | Graph operations, command wrapper and Rust tests | [Graphwiki](shared/graphwiki/README.md) |
 
-The tmux adapter builds with the core. Browser tools have their own TypeScript build; OCR runs as a Node script. Both reuse the root npm dependencies, including pinned `puppeteer-core`, `scribe.js-ocr` and English OCR assets. Graphwiki owns its Cargo lockfile. Plain panes do not require a browser or Rust.
+The tmux adapter builds with the core. Browser tools have their own TypeScript build; OCR and slides run as Node scripts. These modules reuse the root npm dependencies, including pinned `puppeteer-core`, `scribe.js-ocr`, English OCR assets and `pptxgenjs`. Graphwiki owns its Cargo lockfile. Plain panes do not require a browser or Rust.
 
 `shared/Makefile` exposes `browser-connect`, `browser-disconnect`, `browser-status`, `browser-tabs` and `browser-run`, plus the `wiki-*` tools. Run `make -C shared help` to discover them. Browser tools require `BROWSER=chrome|firefox` and an existing browser prepared for remote control. `browser-connect` opens a dedicated tmux service pane that owns one persistent Puppeteer connection; Chrome approval is needed when that connection starts. Later commands reuse it, preserving the browser's profile. `browser-run` executes a standard Puppeteer async function body supplied through a prompt file, `prompt`, or stdin. See the [browser setup and examples](shared/browser/README.md). Graphwiki requires Rust, Cargo and `flock`.
 
@@ -160,6 +175,8 @@ The browser service survives detaching and closing ordinary agent panes while id
 Shared `ocr` reads one complete local PDF, PNG or JPEG and writes English text to stdout, preserving page boundaries. Use `make -C shared ocr INPUT=/absolute/path/document.pdf`; add `OUTPUT=/absolute/path/new-text.txt` to create a file without overwriting an existing one. It runs directly with local model assets and exits after cleanup. `ocr-diagnose` checks dependencies without reading a document. Download or export browser files separately before invoking OCR. See [OCR usage and limitations](shared/ocr/README.md).
 
 Shared `ask`, `reason` and `twitter` provide fresh consultations without local tools or pane context. They share the instance provider configuration and the same prompt inputs. Override `ASK_MODEL`, `REASON_MODEL` or `TWITTER_MODEL` in root `.env` or the command environment using `provider/model-id`. Their defaults are `openrouter/z-ai/glm-5.2`, `openrouter/openai/gpt-5.5`, and `openrouter/x-ai/grok-4.3:online`, respectively. Ordinary consultations retain explicit `:online` support.
+
+Shared `slides-generate` creates a local PPTX from an asynchronous JavaScript body receiving a PptxGenJS `pptx` instance. Use `make -C shared slides-generate PROMPT_FILE=/absolute/path/deck.js OUTPUT=/absolute/path/deck-v1.pptx`. The wrapper saves the result exclusively; choose a new output filename for each revision. Branding, masters and layout functions belong in the calling pane's source. `slides-diagnose` verifies local serialization without a browser, model provider or Google account. See [Slides usage and example](shared/slides/README.md).
 
 ## State and verification
 
@@ -179,6 +196,7 @@ make test
 make -C tmux test
 make -C shared/browser check test
 make -C shared/ocr check test
+make -C shared/slides check test
 make -C shared/graphwiki check test
 ```
 

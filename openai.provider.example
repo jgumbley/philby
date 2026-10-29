@@ -1,0 +1,3 @@
+TYPE=openai
+AUTH=oauth
+MODELS=gpt-5.5

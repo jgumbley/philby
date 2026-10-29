@@ -97,13 +97,17 @@ test('deterministic test provider requires no production configuration',async()=
 });
 test('gateway uses Pi metadata and streams function calls through its configured endpoint',async t=>{
   const options=fixture(t);
-  writeFileSync(join(options.directory,'work.provider'),'TYPE=openai-compatible\nBASE_URL=https://gateway.example/v1/inference/\nAPI_KEY=gateway-key\nCATALOG=anthropic\nMODELS=claude-sonnet-5-5\n');
+  writeFileSync(join(options.directory,'work.provider'),'TYPE=openai-compatible\nBASE_URL=https://gateway.example/v1/inference/\nAPI_KEY=gateway-key\nCATALOG=openrouter\nMODELS=claude-sonnet-5-5=anthropic/claude-sonnet-5-5,agentworks/deepseek-v4-1-flash=deepseek/deepseek-v4.1-flash\n');
   const config=await models('work/claude-sonnet-5-5',options);
   const model=config.models.getModel('work','claude-sonnet-5-5')!;
   const original=getBuiltinModel('anthropic','claude-sonnet-5-5');
   assert.equal(model.contextWindow,original.contextWindow);
   assert.equal(model.maxTokens,original.maxTokens);
   assert.equal(model.name,original.name);
+  const deepseek=config.models.getModel('work','agentworks/deepseek-v4-1-flash')!;
+  const dsOriginal=getBuiltinModel('openrouter','deepseek/deepseek-v4.1-flash');
+  assert.equal(deepseek.id,'agentworks/deepseek-v4-1-flash');
+  assert.equal(deepseek.contextWindow,dsOriginal.contextWindow);
   assert.equal(config.providerType,'openai-compatible');
   let calls=0;
   const result=await config.models.streamSimple(model,{
@@ -138,6 +142,65 @@ test('gateway rejects missing metadata and invalid endpoints before inference',a
     writeFileSync(join(options.directory,'work.provider'),source.replace(from,to));
     await assert.rejects(models('work/claude-sonnet-5-5',options),error=>{
       assert.match(String(error),expected);assert.ok(!String(error).includes('gateway-secret'));return true;
+    });
+  }
+});
+test('OpenAI uses native OAuth Responses requests and preserve tool identity',async t=>{
+  const options=fixture(t);
+  writeFileSync(join(options.directory,'openai.provider'),'TYPE=openai\nAUTH=oauth\nMODELS=gpt-5.5\n');
+  const config=await models('openai/gpt-5.5',options);
+  const {ProviderCredentials}=await import('../src/credentials.js');
+  const credentials=new ProviderCredentials(options.directory);
+  const model=config.models.getModel('openai','gpt-5.5')!;
+  assert.equal(model.api,'openai-responses');
+  assert.equal(config.models.getProvider('openai')!.auth.apiKey,undefined);
+  assert.equal(await config.models.getAuth('openai'),undefined);
+  let requests=0;
+  const missing=await config.models.streamSimple(model,{messages:[]},{fetch:async()=>{requests++;throw Error('must not request');}}).result();
+  assert.equal(missing.stopReason,'error');
+  assert.equal(requests,0);
+  await credentials.modify('openai',async()=>({type:'oauth',access:'test-chatgpt-access',refresh:'test-chatgpt-refresh',expires:Date.now()+3600000}));
+  const item={type:'function_call',id:'fc_test',call_id:'call_test',name:'ping',arguments:'{}',status:'completed'};
+  const events=[
+    {type:'response.created',response:{id:'resp_test',status:'in_progress'}},
+    {type:'response.output_item.added',output_index:0,item},
+    {type:'response.output_item.done',output_index:0,item},
+    {type:'response.completed',response:{id:'resp_test',status:'completed',output:[item],usage:{input_tokens:1,output_tokens:1,total_tokens:2}}},
+  ];
+  const bodies:any[]=[];
+  const fetch:typeof globalThis.fetch=async(url,init)=>{
+    assert.equal(String(url),'https://api.openai.com/v1/responses');
+    assert.equal(new Headers(init?.headers).get('authorization'),'Bearer test-chatgpt-access');
+    const body=JSON.parse(String(init?.body));bodies.push(body);
+    assert.equal(body.store,false);assert.equal(body.stream,true);
+    assert.equal(body.model,'gpt-5.5');
+    for(const key of ['max_output_tokens','temperature','prompt_cache_options','prompt_cache_retention']) assert.equal(body[key],undefined);
+    assert.equal(body.input.some((item:any)=>item.type==='configuration_update'),false);
+    return new Response(events.map(event=>`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),{headers:{'content-type':'text/event-stream'}});
+  };
+  const messages=[{role:'user' as const,content:'Call ping',timestamp:1}];
+  const tools=[{name:'ping',description:'Ping',parameters:{type:'object',properties:{}}}];
+  const result=await config.models.streamSimple(model,{messages,tools},{fetch,reasoning:'high',temperature:0.5,maxTokens:100}).result();
+  assert.equal(result.stopReason,'toolUse',result.errorMessage);
+  assert.equal(result.provider,'openai');
+  assert.equal(result.content.find(part=>part.type==='toolCall')?.id,'call_test|fc_test');
+  const next=await config.models.streamSimple(model,{tools,messages:[...messages,result,{role:'toolResult',toolCallId:'call_test|fc_test',toolName:'ping',content:[{type:'text',text:'pong'}],isError:false,timestamp:2}]},{fetch}).result();
+  assert.notEqual(next.stopReason,'error',next.errorMessage);
+  assert.ok(bodies[1].input.some((item:any)=>item.type==='function_call' && item.id==='fc_test' && item.call_id==='call_test'));
+  assert.equal(result.provider,'openai');
+  assert.ok(modelChoices(config.models).some(choice=>choice.provider==='openai'));
+});
+test('ChatGPT provider configuration rejects keys and unsupported authentication',async t=>{
+  const options=fixture(t);
+  for(const [source,expected] of [
+    ['TYPE=openai\nMODELS=gpt-5.5',/AUTH must be oauth/],
+    ['TYPE=openai\nAUTH=api-key\nMODELS=gpt-5.5',/AUTH must be oauth/],
+    ['TYPE=openai\nAUTH=oauth\nAPI_KEY=test-secret\nMODELS=gpt-5.5',/unsupported setting/],
+    ['TYPE=openai\nAUTH=oauth\nMODELS=missing',/unavailable model/],
+  ] as const) {
+    writeFileSync(join(options.directory,'openai.provider'),source);
+    await assert.rejects(models('openai/gpt-5.5',options),error=>{
+      assert.match(String(error),expected);assert.doesNotMatch(String(error),/test-secret/);return true;
     });
   }
 });

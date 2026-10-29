@@ -5,8 +5,10 @@ ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 ifneq ($(origin prompt),undefined)
 export PROMPT := $(value prompt)
 endif
-export PROMPT
-export PROMPT_FILE
+unexport prompt
+override PROMPT := $(value PROMPT)
+override PROMPT_FILE := $(value PROMPT_FILE)
+export PROMPT PROMPT_FILE
 export slug
 export PROVIDER
 override export BASELINE := $(value BASELINE)
@@ -23,6 +25,7 @@ WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-viewer-start w
 export VIEWER_PORT
 .PHONY: help processes ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test pane-repo-inspect pane-repo-init pane-repo-verify repo-views prompt-audit migrate-state provider-setup
 help:
+	@echo 'provider-login PROVIDER=name — sign in to a TYPE=openai AUTH=oauth provider using ChatGPT'
 	@echo 'provider-models PROVIDER=name — list gateway model metadata using the root name.provider credentials'
 	@echo 'provider-setup — copy missing .env and openrouter.provider examples; leave existing files untouched'
 	@echo 'processes — current-user process tree with elapsed and CPU time; excludes arguments'
@@ -40,6 +43,9 @@ help:
 	@echo 'ocr INPUT=local.pdf|png|jpg|jpeg [OUTPUT=new.txt] — local English text extraction with Scribe.js'
 	@echo 'ocr-diagnose / ocr-check / ocr-test — check dependencies / syntax / temporary document tests'
 	@echo 'OCR prints text with form-feed page separators; OUTPUT saves without overwriting; shared/ocr/README.md'
+	@echo 'slides-generate OUTPUT=new.pptx — PptxGenJS async body receiving pptx, from PROMPT_FILE, prompt, or stdin'
+	@echo 'slides-diagnose / slides-check / slides-test — dependency diagnostics and local generation checks'
+	@echo 'Slides preserve existing outputs; use absolute paths with make -C; shared/slides/README.md'
 	@echo 'Wiki: GRAPH_ROOT=existing graph directory; wiki-context uses PROMPT_FILE, prompt, or stdin'
 	@echo 'wiki-publish CHANGE=stable-change-id; wiki-index; wiki-lint; commands serialize per graph'
 	@echo 'wiki-viewer-install / wiki-viewer-doctor; wiki-viewer-start / wiki-viewer-stop / wiki-viewer-status GRAPH_ROOT=path [VIEWER_PORT=8080]'
@@ -63,6 +69,10 @@ ocr:
 	@$(MAKE) --no-print-directory -s -f "$(ROOT)/shared/ocr/Makefile" run
 ocr-diagnose ocr-check ocr-test:
 	@$(MAKE) --no-print-directory -s -f "$(ROOT)/shared/ocr/Makefile" $(@:ocr-%=%)
+.PHONY: slides-generate slides-diagnose slides-check slides-test
+slides-generate slides-diagnose slides-check slides-test: override MAKEOVERRIDES :=
+slides-generate slides-diagnose slides-check slides-test:
+	@$(MAKE) --no-print-directory -s -f "$(ROOT)/shared/slides/Makefile" $(@:slides-%=%)
 $(WIKI_TOOLS):
 	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/graphwiki/Makefile" $@
 wiki-check:
@@ -75,6 +85,9 @@ repo-views prompt-audit migrate-state:
 	@node "$(ROOT)/shared/$@.mjs"
 provider-setup:
 	@node "$(ROOT)/shared/provider-setup.mjs"
-.PHONY: provider-models
+.PHONY: provider-models provider-login
+provider-login:
+	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build
+	@node --disable-warning=ExperimentalWarning "$(ROOT)/shared/provider-login.mjs"
 provider-models:
 	@node "$(ROOT)/shared/provider-models.mjs"

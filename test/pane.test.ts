@@ -50,15 +50,17 @@ test('a missing saved provider fails without replacing the conversation or retai
     assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Keep the saved provider selection');
   }finally{await reopened.close();}
 });
-test('model switching preserves running tools, queued input, memory and the saved conversation',async()=>{
+test('provider switching preserves running tools, queued input, memory and the saved conversation',async()=>{
   const effect=join(directory,'model-effect'),release=join(directory,'model-release');
-  const alternate={provider:'test',modelId:'test-alternate'};
+  const alternate={provider:'second',modelId:'test-alternate'};
   const faux=fauxProvider({provider:'test',models:[{id:'test'},{id:alternate.modelId}],tokensPerSecond:10000});
   faux.setResponses([
-    fauxAssistantMessage([fauxToolCall('bash',{command:`echo once >> '${effect}'; while [ ! -f '${release}' ]; do sleep .02; done`})],{stopReason:'toolUse'}),
-    fauxAssistantMessage('switched answer'),fauxAssistantMessage('queued answer'),fauxAssistantMessage('reopened answer')
+    fauxAssistantMessage([fauxToolCall('bash',{command:`echo once >> '${effect}'; while [ ! -f '${release}' ]; do sleep .02; done`})],{stopReason:'toolUse'})
   ]);
   const models=createModels();models.setProvider(faux.provider);
+  const second=fauxProvider({provider:alternate.provider,models:[{id:alternate.modelId}],tokensPerSecond:10000});
+  second.setResponses([fauxAssistantMessage('switched answer'),fauxAssistantMessage('queued answer'),fauxAssistantMessage('reopened answer')]);
+  models.setProvider(second.provider);
   const p=await Pane.open('model-switch',models,model);
   const other=await Pane.open('model-other',fixture().models,model);
   try {
@@ -87,6 +89,7 @@ test('model switching preserves running tools, queued input, memory and the save
     await p.conversation.waitForIdle(ctx);
     const history=(await p.conversation.context(ctx)).messages;
     assert.deepEqual(history.filter(m=>m.role==='assistant').map(m=>m.model),['test',alternate.modelId,alternate.modelId]);
+    assert.deepEqual(history.filter(m=>m.role==='assistant').map(m=>m.provider),['test','second','second']);
     assert.equal(readFileSync(effect,'utf8'),'once\n');
     await p.close();
     const reopened=await Pane.open('model-switch',models,model);
