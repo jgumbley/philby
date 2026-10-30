@@ -6,7 +6,7 @@ The kernel provides continuity, communication and control. Panes build small reu
 
 ## Start
 
-Use Node 22.19 or newer, npm, GNU Make, bash and tmux on Linux. Clone this repository, enter its directory, then:
+Use Node 22.19 or newer, npm, GNU Make, bash and tmux on Linux. Clone this repository, enter its directory, then run:
 
 ```sh
 make provider-setup
