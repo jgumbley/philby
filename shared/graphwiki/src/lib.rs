@@ -2,6 +2,7 @@ mod graph;
 mod page;
 mod publish;
 mod storage;
+pub mod viewer;
 
 use std::path::Path;
 

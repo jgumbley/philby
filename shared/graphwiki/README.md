@@ -4,7 +4,8 @@ Philby's owned Rust engine for small Logseq Markdown file graphs. It publishes
 complete page and journal replacements, builds a deterministic article
 catalogue, searches documents, and checks graph structure. Research content and
 authoring conventions belong to each consuming wiki. There is no model
-invocation, downloader, database, or background service.
+invocation or database. A read-only terminal browser is served by a managed
+ttyd process for each graphwiki pane.
 
 ## Development
 
@@ -27,7 +28,66 @@ Requires Rust, Cargo, rustfmt, Clippy, Make, Bash, and a native linker. The
 binary. Formatting checks do not change files; `make fmt` applies formatting.
 `make compile` is an incremental locked build without tests. `make release`
 performs a locked release build; `make ci release` validates it first. `make run`
-runs the validated binary and prints usage. No terminal UI is included.
+runs the validated binary and prints usage. `make update-lock` resolves new
+dependencies while retaining existing locked packages, including the analyzer's
+tree-sitter resolution.
+
+## Read-only browser
+
+Install the pinned ttyd 1.7.7 Linux x86_64 binary locally, then inspect dependencies:
+
+```sh
+make -C shared wiki-viewer-install
+make -C shared wiki-viewer-doctor
+make -C shared wiki-viewer-start GRAPH_ROOT=/absolute/path/to/wiki
+make -C shared wiki-viewer-status GRAPH_ROOT=/absolute/path/to/wiki
+make -C shared wiki-viewer-stop GRAPH_ROOT=/absolute/path/to/wiki
+```
+
+Run these commands from the Philby root. The local binary lives in this module's
+ignored `.tools/` directory. Installation downloads the versioned release from
+[ttyd](https://github.com/tsl0922/ttyd/releases/tag/1.7.7); it does not install a
+system package. The process manager requires Linux `/proc`.
+
+The viewer binds `0.0.0.0:8080` without authentication. Open
+`http://<host>:8080/`. Each browser connection gets its own read-only TUI with
+independent navigation. ttyd accepts terminal input, but the only child command
+is the graph browser: it has no shell, editor, or publication action. Use
+`VIEWER_PORT=8081` for a second graph. An occupied port fails explicitly.
+
+Wiki lists articles; Journal lists daily evidence newest first. Click an article,
+`[[wikilink]]`, relative Markdown document link, or backlink to navigate. Click
+the Wiki, Journal and Back tabs to change views. Markdown is displayed with its
+original syntax and highlighted links. HTTP(S) citations use terminal hyperlinks
+(Ctrl+click in ttyd). Unresolved links show an explicit message. Code spans and
+fenced code do not create links. Only published pages and journals are read;
+drafts, receipts and pane conversations are never included in the viewer.
+
+Keyboard controls: `w` Wiki, `j` Journal, `b`/Backspace back, Tab select a link,
+Enter follow it, arrows and PageUp/PageDown scroll, `r` reload published content,
+`q` disconnect. Mouse wheel scrolls. `wiki-browse GRAPH_ROOT=...` runs the same
+browser in a local terminal. Reads take the same graph lock as publishing, only
+while loading; a connected viewer does not block subsequent publication.
+
+`make -C shared wiki-viewer-capture VIEWER_PORT=8080` diagnoses the HTTP token and
+WebSocket terminal path and prints terminal output without control sequences.
+Optionally supply literal input with `PROMPT_FILE`, `prompt`, or stdin (for
+example `prompt=j` opens Journal). Prompt files also preserve mouse escape
+sequences for manual navigation checks. This reads published graph content.
+
+Startup is idempotent per graph. The process record and log live under
+`.graphwiki/viewer.json` and `.graphwiki/viewer.log`. Stop verifies the recorded
+Linux process identity before terminating that viewer's process group; graph
+content and publication state are retained. Close stops its clients too. The
+pane recipe's `BOOT.md` starts and checks the service through Make, and `close`
+stops it using the existing pane teardown lifecycle. Existing pane recipes are
+never automatically reapplied; add these targets and opening instructions to an
+existing pane deliberately, preserving its edited scope and tools.
+
+The graphwiki pane scope defines a journal-first workflow: evidence, references
+and sourcing are written to dated journals immediately, then articles are
+distilled into the wiki reading view with links back to that evidence. These
+instructions do not impose additional citation requirements on the shared engine.
 
 Clippy limits cognitive complexity to 9, functions to four arguments and fifty
 lines, and applies the other thresholds in `.clippy.toml`. Mozilla's

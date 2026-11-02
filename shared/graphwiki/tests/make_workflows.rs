@@ -15,6 +15,7 @@ fn fixture(root: &Path) {
         "Makefile",
         "common.mk",
         "wiki.mjs",
+        "viewer.mjs",
         "Cargo.toml",
         "Cargo.lock",
         ".clippy.toml",

@@ -7,6 +7,7 @@ Operations:
   publish <graph-root> <change> Publish .drafts/<change>/pages
   index   <graph-root> ''       Regenerate pages/index.md
   lint    <graph-root> ''       Check pages and report unresolved links
+  browse  <graph-root> ''       Read articles and journals in the terminal
 
 Run graphwiki without arguments or with --help to show this help.
 ";
@@ -20,6 +21,9 @@ fn execute() -> graphwiki::Result<()> {
     let [operation, root, argument] = args.as_slice() else {
         return Err(USAGE.into());
     };
+    if operation == "browse" {
+        return graphwiki::viewer::run(Path::new(root));
+    }
     print!(
         "{}",
         graphwiki::execute(operation, Path::new(root), argument)?

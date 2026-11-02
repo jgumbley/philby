@@ -65,6 +65,16 @@ Native `read`, `edit`, `write` and `bash` tools run in the pane's directory. Pur
 
 Pane types are creation recipes. `make pane slug=knowledge TYPE=graphwiki` creates a pane with graph tools; omitting `TYPE` creates a plain pane. Each recipe provides an initial `SCOPE.md`. Reopening preserves edited files and never reapplies the recipe. Requesting a different type for an existing pane fails. Creating a mailbox alone does not choose a type.
 
+Graphwiki panes record sourcing and references in dated journals at write time,
+then maintain linked articles as the wiki reading view. Install the local viewer
+once with `make -C shared wiki-viewer-install`. Their opening checklist starts a
+read-only ttyd browser at `http://<host>:8080/`, listening on all interfaces
+without authentication. Wiki and Journal views have clickable links and backlinks.
+Set `VIEWER_PORT` in an additional pane's Makefile to give it a distinct port.
+Pane targets `viewer-start`, `viewer-status`, `viewer-stop`, and `browse` manage
+the service and local TUI; closing the pane stops its viewer. See the
+[graphwiki module](shared/graphwiki/README.md) for controls and setup.
+
 An optional nonempty `BOOT.md` queues an opening checklist behind recovered work. Its unfinished task resumes without duplicate submission. A pane with `BOOT.md` must supply a `make close` target for teardown. Closure suspends Durable work first, then awaits teardown with a 60-second deadline. Failures are reported while application resources are released. Detaching leaves work running.
 
 All pane directories are private and ignored by this repository. Clone or create independent pane repositories at `panes/<slug>` as needed, keeping `.state/` ignored there too. Creating a pane does not automatically initialise a Git repository.

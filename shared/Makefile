@@ -26,7 +26,8 @@ ifneq ($(origin TEXT),undefined)
 override export TEXT := $(value TEXT)
 endif
 BROWSER_TOOLS := browser-start browser-tabs browser-open browser-navigate browser-focus browser-close browser-eval browser-click browser-fill browser-press browser-fullscreen browser-screenshot browser-windows browser-window-focus browser-window-close
-WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint
+WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-viewer-start wiki-viewer-stop wiki-viewer-status wiki-viewer-doctor wiki-viewer-install wiki-viewer-capture wiki-browse
+export VIEWER_PORT
 .PHONY: help processes ask reason research twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test pane-repo-inspect pane-repo-init pane-repo-verify repo-views prompt-audit migrate-state provider-setup
 help:
 	@echo 'provider-models PROVIDER=name — list gateway model metadata using the root name.provider credentials'
@@ -47,6 +48,9 @@ help:
 	@echo 'browser-check / browser-test — validate the Firefox module in shared/firefox'
 	@echo 'Wiki: GRAPH_ROOT=existing graph directory; wiki-context uses PROMPT_FILE, prompt, or stdin'
 	@echo 'wiki-publish CHANGE=stable-change-id; wiki-index; wiki-lint; commands serialize per graph'
+	@echo 'wiki-viewer-install / wiki-viewer-doctor; wiki-viewer-start / wiki-viewer-stop / wiki-viewer-status GRAPH_ROOT=path [VIEWER_PORT=8080]'
+	@echo 'wiki-browse GRAPH_ROOT=path — read-only TUI; browser viewer binds all interfaces without authentication'
+	@echo 'wiki-viewer-capture [VIEWER_PORT=8080] — capture a browser terminal; optional literal keys via PROMPT_FILE, prompt, stdin'
 	@echo 'wiki-check / wiki-test — check / validate the owned Rust source in shared/graphwiki'
 	@echo 'pane-repo-inspect / pane-repo-init / pane-repo-verify slug=... — manage an independent pane repository'
 	@echo 'repo-views — list tmux working directories and repositories'
