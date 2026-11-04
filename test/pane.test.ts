@@ -2,7 +2,6 @@ import test from 'node:test';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
@@ -17,7 +16,6 @@ mkdirSync(join(directory,'shared'));writeFileSync(join(directory,'shared','Makef
 const {Pane,Memory,Checks,ctx}=await import('../src/pane.js');
 const {envelope,Store,nextDeadline,paths,prepare}=await import('../src/store.js');
 const {request}=await import('../src/ipc.js');
-const {migrateMailboxes}=await import('../src/mailboxes.js');
 const model={provider:'test',modelId:'test'};
 function fixture(responses: Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0]=[fauxAssistantMessage('done')], speed=10000) {
   const faux=fauxProvider({provider:'test',models:[{id:'test'}],tokensPerSecond:speed});
@@ -439,45 +437,6 @@ test('delivery recovers after receiving pane Durable admission before marking it
     assert.equal((await q.conversation.context(ctx)).messages.filter(m=>m.role==='user').length,1);
     assert.equal(q.store.pending().length,0);
   }finally{await q.close();}
-});
-test('legacy mailbox migration requires closed panes and preserves receiving pane state on retry',async()=>{
-  const sender='migration-sender',name='migration-receiving';
-  mkdirSync(paths(sender).state,{recursive:true});
-  const legacy=new DatabaseSync(join(paths(sender).state,'app.sqlite'));
-  legacy.exec('CREATE TABLE outbox (id TEXT PRIMARY KEY, body TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0)');
-  const old=envelope(sender,name,'already received',{id:'migration-old'});
-  const input=envelope(sender,name,'new input',{id:'migration-input',mode:'steer'});
-  const seen=envelope(sender,name,'seen report',{id:'migration-seen',kind:'update'});
-  const update=envelope(sender,name,'new report',{id:'migration-update',kind:'update'});
-  for(const e of [old,input,seen,update])legacy.prepare('INSERT INTO outbox(id,body) VALUES (?,?)').run(e.id,JSON.stringify(e));
-  const receiving=new Store(name);
-  try {
-    receiving.accept(old);receiving.placed(old);receiving.accept(seen);receiving.placed(seen);receiving.updates(true);
-    const live=await Pane.open('migration-live',fixture().models,model);
-    try {assert.throws(()=>migrateMailboxes(),/Close pane migration-live/);}
-    finally {await live.close();}
-    assert.deepEqual(migrateMailboxes(),{migrated:4});
-    assert.deepEqual(migrateMailboxes(),{migrated:0});
-    assert.deepEqual(receiving.pending(),[input,update]);
-    assert.deepEqual(receiving.updates(),[{...seen,seen:true}]);
-    assert.equal(legacy.prepare('SELECT count(*) AS count FROM outbox WHERE delivered=1').get()!.count,4);
-    for(const file of ['SCOPE.md','Makefile','.pane-type'])assert.equal(existsSync(join(paths(name).tools,file)),false);
-  }finally{receiving.close();legacy.close();}
-});
-test('legacy mailbox migration does not acknowledge conflicting content',()=>{
-  const sender='migration-conflict-sender',name='migration-conflict-receiving';
-  mkdirSync(paths(sender).state,{recursive:true});
-  const legacy=new DatabaseSync(join(paths(sender).state,'app.sqlite'));
-  legacy.exec('CREATE TABLE outbox (id TEXT PRIMARY KEY, body TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0)');
-  const e=envelope(sender,name,'original',{id:'migration-conflict'});
-  legacy.prepare('INSERT INTO outbox(id,body) VALUES (?,?)').run(e.id,JSON.stringify({...e,content:'conflicting'}));
-  const receiving=new Store(name);
-  try {
-    receiving.accept(e);
-    assert.throws(()=>migrateMailboxes(),/conflict/);
-    assert.equal(legacy.prepare('SELECT delivered FROM outbox WHERE id=?').get(e.id)!.delivered,0);
-    assert.deepEqual(receiving.pending(),[e]);
-  }finally{receiving.close();legacy.close();}
 });
 test('plan mode gates mutating tools to read-only until exited',async()=>{
   const target=join(directory,'plan-target');

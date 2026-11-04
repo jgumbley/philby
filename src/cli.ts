@@ -2,7 +2,6 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { root, panesRoot, slug, Store, envelope, locked, lock, configured, paneTypes, paths } from './store.js';
-import { migrateMailboxes } from './mailboxes.js';
 import { request, running } from './ipc.js';
 import { models } from './models.js';
 import { consultationDefaults } from './providers.js';
@@ -47,7 +46,6 @@ async function main() {
   if(command==='name') return selectPane(openPane,await Promise.all(saved().sort().map(async name=>({name,running:!!await running(name)}))),paneTypes());
   if(command==='new') return openSelector();
   if(command==='open') return destination?openPane(slug(destination),type):openSelector();
-  if(command==='migrate-mailboxes') {console.log(JSON.stringify(migrateMailboxes()));return;}
   if(command==='send' || command==='report') return send(destination,command==='report'?'update':'input');
   if(command==='list') {
     console.log('Agent slug\tState (saved = closed)');

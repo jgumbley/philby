@@ -4,12 +4,11 @@ SHELL := /bin/bash
 
 MODULE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CARGO ?= cargo
-DIGEST_FILES := AGENTS.md README.md DECISIONS.md Makefile Cargo.toml Cargo.lock .clippy.toml rustfmt.toml common.mk wiki.mjs viewer.mjs tests/fixtures/consumer.mk
+DIGEST_FILES := AGENTS.md README.md DECISIONS.md Makefile Cargo.toml Cargo.lock .clippy.toml rustfmt.toml common.mk clipboard.mk wiki.mjs tests/fixtures/consumer.mk
 DIGEST_DIRS := src tests
 include $(dir $(lastword $(MAKEFILE_LIST)))common.mk
 
 export OPERATION ARGUMENT GRAPH_ROOT
-export VIEWER_PORT
 ifneq ($(origin prompt),undefined)
 export PROMPT := $(value prompt)
 endif
@@ -22,19 +21,13 @@ override export CHANGE := $(value CHANGE)
 help:
 	@echo 'wiki-context GRAPH_ROOT=path — search with PROMPT_FILE, prompt, or stdin'
 	@echo 'wiki-publish GRAPH_ROOT=path CHANGE=id; wiki-index; wiki-lint — graph operations'
-	@echo 'wiki-viewer-install / wiki-viewer-doctor — install pinned local ttyd / check dependencies'
-	@echo 'wiki-viewer-start / wiki-viewer-stop / wiki-viewer-status GRAPH_ROOT=path [VIEWER_PORT=8080]'
 	@echo 'wiki-browse GRAPH_ROOT=path — read-only terminal browser with clickable links'
-	@echo 'wiki-viewer-capture [VIEWER_PORT=8080] — capture HTTP/WebSocket terminal output; optional literal prompt keys'
 	@echo 'check — compile checks; test — formatting, Clippy and tests; ci — test and build'
 
 wiki-context wiki-publish wiki-index wiki-lint:
 	@node "$(MODULE)/wiki.mjs" $(@:wiki-%=%)
 
-.PHONY: wiki-viewer-start wiki-viewer-stop wiki-viewer-status wiki-viewer-doctor wiki-viewer-install wiki-viewer-capture wiki-browse update-lock
-wiki-viewer-start wiki-viewer-stop wiki-viewer-status wiki-viewer-doctor wiki-viewer-install wiki-viewer-capture:
-	@node "$(MODULE)/viewer.mjs" $(@:wiki-viewer-%=%)
-
+.PHONY: wiki-browse update-lock
 wiki-browse:
 	@node "$(MODULE)/wiki.mjs" browse
 

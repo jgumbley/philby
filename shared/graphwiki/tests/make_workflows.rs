@@ -15,7 +15,7 @@ fn fixture(root: &Path) {
         "Makefile",
         "common.mk",
         "wiki.mjs",
-        "viewer.mjs",
+        "clipboard.mk",
         "Cargo.toml",
         "Cargo.lock",
         ".clippy.toml",
@@ -62,21 +62,43 @@ fn fixture_binary(directory: &Path, source: &str, name: &str) -> PathBuf {
     receiver
 }
 
-fn make(root: &Path, arguments: &[&str], receiver: &Path, clipboard: &Path) -> Output {
+fn clipboard_receiver(directory: &Path) -> PathBuf {
+    let receiver = fixture_binary(directory, "tests/fixtures/clipboard.rs", "pbcopy");
+    for name in ["wl-copy", "xclip", "uname"] {
+        fs::copy(&receiver, directory.join(name)).unwrap();
+    }
+    receiver
+}
+
+fn make_command(root: &Path, arguments: &[&str], receiver: &Path, clipboard: &Path) -> Command {
     let old_path = env::var_os("PATH").unwrap();
     let paths = std::iter::once(receiver.parent().unwrap().to_path_buf())
         .chain(env::split_paths(&old_path));
-    Command::new("make")
+    let mut command = Command::new("make");
+    command
         .args(["--no-print-directory", "-s"])
         .args(arguments)
         .current_dir(root)
         .env_remove("MAKEFLAGS")
         .env("PATH", env::join_paths(paths).unwrap())
         .env("GRAPHWIKI_CLIPBOARD_FILE", clipboard)
+        .env(
+            "GRAPHWIKI_CLIPBOARD_CALLS",
+            clipboard.with_extension("calls"),
+        )
+        .env("GRAPHWIKI_CLIPBOARD_PLATFORM", "Linux")
+        .env("WAYLAND_DISPLAY", "isolated-wayland")
+        .env_remove("DISPLAY")
+        .env_remove("GRAPHWIKI_CLIPBOARD_FAIL")
         .env("CARGO", receiver.parent().unwrap().join("cargo"))
         .env("CARGO_TARGET_DIR", root.join("custom target"))
         .env("GRAPHWIKI_EXPECTED_TARGET_DIR", root.join("custom target"))
-        .env("GRAPHWIKI_BINARY", env!("CARGO_BIN_EXE_graphwiki"))
+        .env("GRAPHWIKI_BINARY", env!("CARGO_BIN_EXE_graphwiki"));
+    command
+}
+
+fn make(root: &Path, arguments: &[&str], receiver: &Path, clipboard: &Path) -> Output {
+    make_command(root, arguments, receiver, clipboard)
         .output()
         .unwrap()
 }
@@ -86,7 +108,7 @@ fn both_ingest_targets_copy_exactly_their_scoped_digest() {
     let workspace = tempfile::tempdir().unwrap();
     let root = workspace.path().join("graph");
     fixture(&root);
-    let receiver = fixture_binary(workspace.path(), "tests/fixtures/clipboard.rs", "wl-copy");
+    let receiver = clipboard_receiver(workspace.path());
     let clipboard = workspace.path().join("clipboard.txt");
     for scope in [root.clone(), root.join("engine")] {
         let digest = make(&scope, &["digest"], &receiver, &clipboard);
@@ -110,11 +132,88 @@ fn both_ingest_targets_copy_exactly_their_scoped_digest() {
 }
 
 #[test]
+fn ingest_selects_the_desktop_clipboard_on_macos_wayland_and_x11() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("graph");
+    fixture(&root);
+    let receiver = clipboard_receiver(workspace.path());
+    let clipboard = workspace.path().join("clipboard.txt");
+    let digest = make(&root, &["digest"], &receiver, &clipboard).stdout;
+    for (platform, wayland, expected) in [
+        ("Darwin", "", "pbcopy"),
+        ("Linux", "isolated-wayland", "wl-copy"),
+        ("Linux", "", "xclip"),
+    ] {
+        fs::write(clipboard.with_extension("calls"), "").unwrap();
+        let output = make_command(&root, &["ingest"], &receiver, &clipboard)
+            .env("GRAPHWIKI_CLIPBOARD_PLATFORM", platform)
+            .env("WAYLAND_DISPLAY", wayland)
+            .env("DISPLAY", ":isolated")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        assert_eq!(fs::read(&clipboard).unwrap(), digest);
+        assert_eq!(
+            fs::read_to_string(clipboard.with_extension("calls")).unwrap(),
+            format!("{expected}\n")
+        );
+    }
+}
+
+#[test]
+fn unsupported_desktops_leave_the_clipboard_untouched() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("graph");
+    fixture(&root);
+    let receiver = clipboard_receiver(workspace.path());
+    let clipboard = workspace.path().join("clipboard.txt");
+    fs::write(&clipboard, "Previous clipboard contents").unwrap();
+    for platform in ["Linux", "Unsupported"] {
+        let output = make_command(&root, &["ingest"], &receiver, &clipboard)
+            .env("GRAPHWIKI_CLIPBOARD_PLATFORM", platform)
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("DISPLAY")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(!clipboard.with_extension("calls").exists());
+        assert_eq!(
+            fs::read_to_string(&clipboard).unwrap(),
+            "Previous clipboard contents"
+        );
+    }
+}
+
+#[test]
+fn failed_clipboard_commands_do_not_try_another_backend() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().join("graph");
+    fixture(&root);
+    let receiver = clipboard_receiver(workspace.path());
+    let clipboard = workspace.path().join("clipboard.txt");
+    fs::write(&clipboard, "Previous clipboard contents").unwrap();
+    let output = make_command(&root, &["ingest"], &receiver, &clipboard)
+        .env("DISPLAY", ":isolated")
+        .env("GRAPHWIKI_CLIPBOARD_FAIL", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        fs::read_to_string(clipboard.with_extension("calls")).unwrap(),
+        "wl-copy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(clipboard).unwrap(),
+        "Previous clipboard contents"
+    );
+}
+
+#[test]
 fn a_failed_digest_does_not_replace_clipboard_contents() {
     let workspace = tempfile::tempdir().unwrap();
     let root = workspace.path().join("graph");
     fixture(&root);
-    let receiver = fixture_binary(workspace.path(), "tests/fixtures/clipboard.rs", "wl-copy");
+    let receiver = clipboard_receiver(workspace.path());
     let clipboard = workspace.path().join("clipboard.txt");
     fs::write(&clipboard, "Previous clipboard contents").unwrap();
     fs::remove_file(root.join("README.md")).unwrap();

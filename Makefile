@@ -1,6 +1,7 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := run
+include shared/graphwiki/clipboard.mk
 ifneq ($(origin prompt),undefined)
 export PROMPT := $(value prompt)
 endif
@@ -8,7 +9,7 @@ export PROMPT
 override PLAN := $(value PLAN)
 export PLAN
 export PROMPT_FILE slug from REQUEST_ID MODE FIELD ID PAUSED MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
-.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup migrate-mailboxes ask reason twitter provider-setup
+.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps build check test check-all test-all help digest ingest quit cleanup ask reason twitter provider-setup
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -34,7 +35,7 @@ run: build
 pane: run
 pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $(@:pane-%=%)
-window quit cleanup migrate-mailboxes: build
+window quit cleanup: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $@
 check: deps
 	@npm run check
@@ -46,12 +47,14 @@ check-all: check
 	@$(MAKE) --no-print-directory -C shared/browser check
 	@$(MAKE) --no-print-directory -C shared/ocr check
 	@$(MAKE) --no-print-directory -C shared/slides check
+	@$(MAKE) --no-print-directory -C shared/google-workspace check
 	@$(MAKE) --no-print-directory -C shared/graphwiki check
 test-all: test
 	@$(MAKE) --no-print-directory -C tmux test
 	@$(MAKE) --no-print-directory -C shared/browser test
 	@$(MAKE) --no-print-directory -C shared/ocr test
 	@$(MAKE) --no-print-directory -C shared/slides test
+	@$(MAKE) --no-print-directory -C shared/google-workspace test
 	@$(MAKE) --no-print-directory -C shared/graphwiki test
 provider-setup:
 	@$(MAKE) --no-print-directory -C shared provider-setup
@@ -72,17 +75,16 @@ help:
 	@echo 'pane-capture ALL=1 — include archived entries from before /new in chronological order'
 	@echo 'window deps build check test digest ingest cleanup; shared: ask reason twitter'
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'
-	@echo 'digest — print all Git-tracked files; ingest — copy that digest to the Wayland clipboard'
+	@echo 'digest — print existing Git-tracked files; ingest — copy that digest to the macOS or Linux clipboard'
 	@echo 'quit — close all Philby panes after y/n confirmation; /quit works inside any agent pane'
 	@echo 'Browser tools: make -C shared help (browser-status, browser-tabs, browser-run; BROWSER=chrome|firefox)'
 	@echo 'OCR: make -C shared ocr INPUT=/path/document.pdf [OUTPUT=/path/new.txt]; ocr-diagnose'
 	@echo 'Slides: make -C shared slides-generate PROMPT_FILE=/path/deck.js OUTPUT=/path/new.pptx; slides-diagnose'
+	@echo 'Google Workspace: make -C shared help (google-workspace-login, -read, -spaces, -messages, -export, -download, -diagnose)'
 	@echo 'Wiki tools: make -C shared help (wiki-context, wiki-publish, wiki-index, wiki-lint)'
-	@echo 'migrate-mailboxes — move pending legacy outboxes into receiving pane mailboxes; close all panes first'
-	@echo 'Legacy state: make -C shared migrate-state after closing old panes'
 digest:
-	@git ls-files -z --deduplicate | LC_ALL=C sort -z | while IFS= read -r -d '' file; do printf '\n--- %s ---\n' "$$file"; cat -- "$$file"; done
+	@set -eu -o pipefail; git ls-files -z --deduplicate | LC_ALL=C sort -z | while IFS= read -r -d '' file; do [ -e "$$file" ] || continue; printf '\n--- %s ---\n' "$$file"; cat -- "$$file"; done
 	$(success)
 ingest:
-	@digest_file=$$(mktemp); trap 'rm -f "$$digest_file"' EXIT; $(MAKE) --no-print-directory -s digest > "$$digest_file"; wl-copy < "$$digest_file"
+	$(copy_digest)
 	$(success)

@@ -79,15 +79,19 @@ Native `read`, `edit`, `write` and `bash` tools run in the pane's directory. Pur
 
 Pane types are creation recipes. `make pane slug=knowledge TYPE=graphwiki` creates a pane with graph tools; omitting `TYPE` creates a plain pane. Each recipe provides an initial `SCOPE.md`. Reopening preserves edited files and never reapplies the recipe. Requesting a different type for an existing pane fails. Creating a mailbox alone does not choose a type.
 
-Graphwiki panes record sourcing and references in dated journals at write time,
-then maintain linked articles as the wiki reading view. Install the local viewer
-once with `make -C shared wiki-viewer-install`. Their opening checklist starts a
-read-only ttyd browser at `http://<host>:8080/`, listening on all interfaces
-without authentication. Wiki and Journal views have clickable links and backlinks.
-Set `VIEWER_PORT` in an additional pane's Makefile to give it a distinct port.
-Pane targets `viewer-start`, `viewer-status`, `viewer-stop`, and `browse` manage
-the service and local TUI; closing the pane stops its viewer. See the
-[graphwiki module](shared/graphwiki/README.md) for controls and setup.
+Graphwiki panes record all sourcing, attribution and references only in dated
+journals at write time, then maintain concept articles as the wiki reading view.
+Articles link to related concepts and retain material uncertainty; they contain
+no provenance metadata, journal links or source narration. Journal entries link
+to the articles they inform. The pane's `editorial-check` target checks common
+provenance markers before publication and during `lint`; manual editorial review
+is still required. See the recipe's [editorial interface](pane-types/graphwiki/EDITORIAL.md).
+Existing panes need their scope and tools updated explicitly, then reopening to
+load the new scope; creation recipes are never reapplied automatically.
+Use `make browse` in a Graphwiki pane for the local read-only terminal browser.
+Wiki and Journal views have clickable links and backlinks. No web service starts
+when a pane opens. Pane-specific HTML previews remain ordinary local tools.
+See the [graphwiki module](shared/graphwiki/README.md) for terminal controls.
 
 An optional nonempty `BOOT.md` queues an opening checklist behind recovered work. Its unfinished task resumes without duplicate submission. A pane with `BOOT.md` must supply a `make close` target for teardown. Closure suspends Durable work first, then awaits teardown with a 60-second deadline. Failures are reported while application resources are released. Detaching leaves work running.
 
@@ -164,6 +168,7 @@ Choose `intervalMs` (an integer of at least 1000) or `daily` (`HH:mm`), with an 
 | `shared/browser/` | Puppeteer tools for existing Chrome and Firefox sessions | [Browser](shared/browser/README.md) |
 | `shared/ocr/` | Local English text extraction from screenshots and PDFs | [OCR](shared/ocr/README.md) |
 | `shared/slides/` | Local PPTX generation with PptxGenJS | [Slides](shared/slides/README.md) |
+| `shared/google-workspace/` | Read-only Google Chat, Docs, Sheets, Slides and Drive tools using gogcli | [Google Workspace](shared/google-workspace/README.md) |
 | `shared/graphwiki/` | Graph operations, command wrapper and Rust tests | [Graphwiki](shared/graphwiki/README.md) |
 
 The tmux adapter builds with the core. Browser tools have their own TypeScript build; OCR and slides run as Node scripts. These modules reuse the root npm dependencies, including pinned `puppeteer-core`, `scribe.js-ocr`, English OCR assets and `pptxgenjs`. Graphwiki owns its Cargo lockfile. Plain panes do not require a browser or Rust.
@@ -178,15 +183,17 @@ Shared `ask`, `reason` and `twitter` provide fresh consultations without local t
 
 Shared `slides-generate` creates a local PPTX from an asynchronous JavaScript body receiving a PptxGenJS `pptx` instance. Use `make -C shared slides-generate PROMPT_FILE=/absolute/path/deck.js OUTPUT=/absolute/path/deck-v1.pptx`. The wrapper saves the result exclusively; choose a new output filename for each revision. Branding, masters and layout functions belong in the calling pane's source. `slides-diagnose` verifies local serialization without a browser, model provider or Google account. See [Slides usage and example](shared/slides/README.md).
 
+Shared `google-workspace-*` targets read Google Chat, Docs, Sheets, Slides and Drive through the current `gog` on `PATH`. The macOS `core-tools` role in `../setup-system` installs the latest gogcli through `make setup`; Philby neither vendors nor pins the client and has no runtime dependency on that checkout. Supply `GOOGLE_ACCOUNT=email` on data commands. `google-workspace-read URL=...` reads a document, `google-workspace-spaces` lists Chat spaces, and `google-workspace-messages SPACE=spaces/...` reads messages. `google-workspace-export` and `google-workspace-download` create private output files without overwriting existing files. Authentication explicitly selects gog's `default` OAuth client and combined read-only service authorization. See [Google Workspace setup, inputs and verification](shared/google-workspace/README.md).
+
 ## State and verification
 
 Each pane lives entirely under `panes/<slug>/`: its scope, Makefile, tools, working files and private `.state/` directory. `.state/durable.sqlite` stores conversation, memory and task state; `.state/app.sqlite` stores mailbox records and reports. Each slug has one application process and Durable store. A SQLite lifetime lock prevents duplicate owners; private Unix sockets carry local commands.
 
 `PHILBY_PANES_DIR` relocates the complete pane directory tree, including state. `PHILBY_HOME` is no longer supported and is rejected. `PHILBY_TMUX_SOCKET` isolates the tmux server. Tests use temporary directories and deterministic providers. Unsafe interrupted tools are reported rather than replayed automatically. Back up pane directories with panes closed or with SQLite-aware tooling.
 
-When upgrading from the separate `.philby/` state tree, close all old pane processes first, then run `make -C shared migrate-state`. It moves `.philby/panes/<slug>/` into each pane's `.state/` and removes the former unused `philby` coordinator. Run this before reopening panes with the new layout.
-
-For an installation with legacy outboxes: close panes with `make cleanup`, run `make migrate-mailboxes`, then repeat it to confirm zero pending migrations before reopening. Migration preserves receiving mailboxes, conversations and report read state. Keep older processes stopped during migration.
+Legacy `.philby/` state and outbox migrations are no longer shipped. Complete
+those migrations with a prior Philby version before upgrading. Philby rejects
+legacy state rather than replacing or importing the saved conversation.
 
 ```sh
 make help
@@ -197,10 +204,16 @@ make -C tmux test
 make -C shared/browser check test
 make -C shared/ocr check test
 make -C shared/slides check test
+make -C shared/google-workspace check test
 make -C shared/graphwiki check test
 ```
 
-Core checks need no browser or Rust toolchain. `make check-all test-all` runs the aggregate checks and suites. Existing tests cover persistence, message delivery, memory, instructions, recovery, pane recipes and module behaviour. Terminal tests require util-linux `script` on Linux or the system `script` on macOS. Pane-specific workflows are verified through their own Make targets. `make ingest` copies the tracked digest using the optional Wayland `wl-copy` command.
+Core checks need no browser or Rust toolchain. `make check-all test-all` runs the aggregate checks and suites. Existing tests cover persistence, message delivery, memory, instructions, recovery, pane recipes and module behaviour. Terminal tests require util-linux `script` on Linux or the system `script` on macOS. Pane-specific workflows are verified through their own Make targets. `make ingest` copies the existing tracked-file digest to the desktop clipboard.
+It uses `pbcopy` on macOS, `wl-copy` when Linux has `WAYLAND_DISPLAY`, or
+`xclip -selection clipboard` when Linux has only `DISPLAY`. Install `wl-clipboard`
+for Wayland or `xclip` for X11. A headless Linux session fails explicitly. A missing
+or failing selected command is reported; no other backend is tried. The digest
+must finish successfully before the clipboard is touched.
 
 Linux verification of the browser and OCR modules is pending a separate session; [linux.txt](linux.txt) records the checks to run and results to collect.
 

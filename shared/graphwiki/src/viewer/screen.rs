@@ -2,7 +2,9 @@ use std::io::{self, Write};
 
 use crossterm::{cursor, event, execute, queue, style, terminal};
 
-use super::document::{Document, Target};
+use style::Attribute::{Bold, Italic, Reverse, Underlined};
+
+use super::document::{Cell, Document, Target};
 
 pub struct Terminal;
 
@@ -45,16 +47,84 @@ pub fn draw(
     footer(&mut output, message, (width, height))
 }
 
+const TABS: [(&str, style::Color); 3] = [
+    (
+        " Wiki ",
+        style::Color::Rgb {
+            r: 97,
+            g: 175,
+            b: 239,
+        },
+    ),
+    (
+        " Journal ",
+        style::Color::Rgb {
+            r: 229,
+            g: 192,
+            b: 123,
+        },
+    ),
+    (
+        " Back ",
+        style::Color::Rgb {
+            r: 198,
+            g: 120,
+            b: 221,
+        },
+    ),
+];
+const BAR: style::Color = style::Color::Rgb {
+    r: 40,
+    g: 44,
+    b: 52,
+};
+const DIM: style::Color = style::Color::Rgb {
+    r: 92,
+    g: 99,
+    b: 112,
+};
+const TEXT: style::Color = style::Color::Rgb {
+    r: 171,
+    g: 178,
+    b: 191,
+};
+
 fn header(output: &mut impl Write, width: u16) -> io::Result<()> {
     queue!(
         output,
+        style::SetAttribute(style::Attribute::Reset),
         terminal::Clear(terminal::ClearType::All),
-        cursor::MoveTo(0, 0)
+        cursor::MoveTo(0, 0),
+        style::SetBackgroundColor(BAR)
     )?;
-    write!(
+    for (label, color) in TABS {
+        tab(output, label, color)?;
+    }
+    let used: usize = TABS.iter().map(|(label, _)| label.len() + 1).sum();
+    queue!(
         output,
-        "{}",
-        clipped("[ Wiki ] [ Journal ] [ Back ]   Graphwiki", width)
+        style::SetForegroundColor(DIM),
+        style::Print(format!(
+            "{:<1$}",
+            "  Graphwiki",
+            (width as usize).saturating_sub(used)
+        )),
+        style::ResetColor,
+        cursor::MoveTo(0, 1),
+        style::SetForegroundColor(DIM),
+        style::Print("─".repeat(width as usize)),
+        style::ResetColor
+    )
+}
+
+fn tab(output: &mut impl Write, label: &str, color: style::Color) -> io::Result<()> {
+    queue!(
+        output,
+        style::SetForegroundColor(color),
+        style::SetAttribute(style::Attribute::Bold),
+        style::Print(label),
+        style::SetAttribute(style::Attribute::NormalIntensity),
+        style::Print(" ")
     )
 }
 
@@ -80,12 +150,18 @@ fn body(
 }
 
 fn footer(output: &mut impl Write, message: &str, size: (u16, u16)) -> io::Result<()> {
+    let text = clipped(message, size.0);
+    let fill = " ".repeat((size.0 as usize).saturating_sub(text.chars().count()));
     queue!(
         output,
-        style::ResetColor,
-        cursor::MoveTo(0, size.1.saturating_sub(1))
+        style::SetAttribute(style::Attribute::Reset),
+        cursor::MoveTo(0, size.1.saturating_sub(1)),
+        style::SetBackgroundColor(BAR),
+        style::SetForegroundColor(TEXT),
+        style::Print(text),
+        style::Print(fill),
+        style::ResetColor
     )?;
-    write!(output, "{}", clipped(message, size.0))?;
     output.flush()
 }
 
@@ -98,14 +174,12 @@ fn clipped(text: &str, width: u16) -> String {
 
 fn print_cell(
     output: &mut impl Write,
-    cell: &super::document::Cell,
+    cell: &Cell,
     document: &Document,
     selected: Option<usize>,
 ) -> io::Result<()> {
-    queue!(
-        output,
-        style::SetForegroundColor(color(cell.link, selected))
-    )?;
+    queue!(output, style::SetAttribute(style::Attribute::Reset))?;
+    apply(output, cell, selected)?;
     if let Some(Target::Web(url)) = cell.link.map(|i| &document.links[i]) {
         let url: String = url.chars().filter(|c| !c.is_control()).collect();
         write!(output, "\x1b]8;;{url}\x1b\\{}\x1b]8;;\x1b\\", cell.text)
@@ -114,12 +188,41 @@ fn print_cell(
     }
 }
 
-fn color(link: Option<usize>, selected: Option<usize>) -> style::Color {
-    match link {
-        Some(link) if Some(link) == selected => style::Color::Yellow,
-        Some(_) => style::Color::Cyan,
-        None => style::Color::Reset,
+fn apply(output: &mut impl Write, cell: &Cell, selected: Option<usize>) -> io::Result<()> {
+    let (color, attributes) = appearance(cell, selected);
+    queue!(output, style::SetForegroundColor(color))?;
+    for attribute in attributes {
+        queue!(output, style::SetAttribute(*attribute))?;
     }
+    Ok(())
+}
+
+type Look = (style::Color, &'static [style::Attribute]);
+
+const LOOKS: [Look; 11] = [
+    (TEXT, &[]),
+    (rgb(97, 175, 239), &[Bold, Underlined]),
+    (rgb(224, 108, 117), &[Bold]),
+    (rgb(229, 192, 123), &[Bold]),
+    (rgb(152, 195, 121), &[Bold]),
+    (rgb(255, 255, 255), &[Bold]),
+    (rgb(198, 120, 221), &[Italic]),
+    (rgb(152, 195, 121), &[]),
+    (DIM, &[Italic]),
+    (rgb(209, 154, 102), &[Bold]),
+    (rgb(209, 154, 102), &[]),
+];
+
+fn appearance(cell: &Cell, selected: Option<usize>) -> Look {
+    match cell.link {
+        Some(link) if Some(link) == selected => (rgb(229, 192, 123), &[Bold, Reverse]),
+        Some(_) => (rgb(86, 182, 194), &[Underlined]),
+        None => LOOKS[cell.style as usize],
+    }
+}
+
+const fn rgb(r: u8, g: u8, b: u8) -> style::Color {
+    style::Color::Rgb { r, g, b }
 }
 
 pub fn clicked(document: &Document, offset: usize, column: u16, row: u16) -> Option<usize> {

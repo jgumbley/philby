@@ -17,7 +17,7 @@ export function slug(value: string) {
 }
 export function paths(name: string) {
   slug(name);
-  if(existsSync(join(root,'.philby','panes',name))) throw Error(`Pane ${name} has legacy state; close old panes and run make -C shared migrate-state`);
+  if(existsSync(join(root,'.philby','panes',name))) throw Error(`Pane ${name} has unsupported legacy state; migrate it with a prior Philby version before opening`);
   const tools = join(panesRoot, name);
   const state = join(tools, '.state');
   const socketDir = runtimeDir;

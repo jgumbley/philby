@@ -1,4 +1,6 @@
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag};
+use std::ops::Range;
+
+use pulldown_cmark::{Event, HeadingLevel, LinkType, Options, Parser, Tag};
 use unicode_width::UnicodeWidthChar;
 
 use crate::{graph::Graph, page::Page};
@@ -10,16 +12,40 @@ pub enum Target {
     Missing(String),
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum Style {
+    #[default]
+    Plain,
+    Title,
+    Heading1,
+    Heading2,
+    Heading3,
+    Strong,
+    Emphasis,
+    Code,
+    Quote,
+    Marker,
+    Key,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Mark {
+    style: Style,
+    link: Option<usize>,
+}
+
 pub struct Cell {
     pub text: char,
     pub width: usize,
     pub link: Option<usize>,
+    pub style: Style,
 }
 
 #[derive(Default)]
 pub struct Document {
     pub rows: Vec<Vec<Cell>>,
     pub links: Vec<Target>,
+    style: Style,
 }
 
 impl Document {
@@ -55,7 +81,14 @@ impl Document {
             text,
             width: size,
             link,
+            style: self.style,
         });
+    }
+
+    fn styled(&mut self, text: &str, style: Style, width: usize) {
+        self.style = style;
+        self.append(text, None, width);
+        self.style = Style::Plain;
     }
 
     pub fn linked(&mut self, text: &str, target: Target, width: usize) {
@@ -66,9 +99,10 @@ impl Document {
 
     pub fn article(graph: &Graph, page: &Page, width: usize) -> Self {
         let mut document = Self::default();
-        document.append(&format!("{}\n\n", page.title()), None, width);
+        document.styled(&format!("{}\n\n", page.title()), Style::Title, width);
         document.markdown(graph, page, width);
-        document.append("\n\nLinked from\n", None, width);
+        document.append("\n\n", None, width);
+        document.styled("Linked from\n", Style::Heading2, width);
         let title = page.title().to_lowercase();
         for backlink in graph
             .pages
@@ -82,7 +116,17 @@ impl Document {
     }
 
     fn markdown(&mut self, graph: &Graph, page: &Page, width: usize) {
-        let mut offset = 0;
+        let mut marks = vec![Mark::default(); page.content.len()];
+        paint_styles(&mut marks, page);
+        self.paint_links(graph, page, &mut marks);
+        for (index, text) in page.content.char_indices() {
+            self.style = marks[index].style;
+            self.character(text, marks[index].link, width);
+        }
+        self.style = Style::Plain;
+    }
+
+    fn paint_links(&mut self, graph: &Graph, page: &Page, marks: &mut [Mark]) {
         for (event, range) in
             Parser::new_ext(&page.content, Options::ENABLE_WIKILINKS).into_offset_iter()
         {
@@ -92,16 +136,11 @@ impl Document {
                 ..
             }) = event
             {
-                self.append(&page.content[offset..range.start], None, width);
-                self.linked(
-                    &page.content[range.clone()],
-                    resolve(graph, page, link_type, &dest_url),
-                    width,
-                );
-                offset = range.end;
+                self.links.push(resolve(graph, page, link_type, &dest_url));
+                let link = Some(self.links.len() - 1);
+                marks[range].iter_mut().for_each(|mark| mark.link = link);
             }
         }
-        self.append(&page.content[offset..], None, width);
     }
 
     pub fn catalogue(graph: &Graph, journals: bool, width: usize) -> Self {
@@ -111,7 +150,7 @@ impl Document {
         } else {
             "Wiki — linked articles\n\n"
         };
-        document.append(title, None, width);
+        document.styled(title, Style::Title, width);
         let mut pages: Vec<_> = graph
             .pages
             .values()
@@ -152,4 +191,77 @@ fn relative<'a>(graph: &'a Graph, page: &Page, target: &str) -> Option<&'a Page>
         None => format!("{}/{}", page.directory, path.trim_start_matches("./")),
     };
     graph.pages.get(&key)
+}
+
+fn paint(marks: &mut [Mark], range: Range<usize>, style: Style) {
+    marks[range].iter_mut().for_each(|mark| mark.style = style);
+}
+
+fn paint_styles(marks: &mut [Mark], page: &Page) {
+    let parser = Parser::new_ext(&page.content, Options::ENABLE_WIKILINKS);
+    for (event, range) in parser.into_offset_iter() {
+        if let Some((style, range)) = styled_range(&event, range, &page.content) {
+            paint(marks, range, style);
+        }
+    }
+    paint_properties(marks, page);
+}
+
+fn paint_properties(marks: &mut [Mark], page: &Page) {
+    let lines = page.content.split_inclusive('\n').scan(0, |offset, line| {
+        let start = *offset;
+        *offset += line.len();
+        Some((start, line))
+    });
+    for (start, line) in lines
+        .skip_while(|(_, line)| line.trim().is_empty())
+        .take(page.properties.len())
+    {
+        let key = line.find("::").map_or(0, |index| index + 2);
+        paint(marks, start..start + key, Style::Key);
+    }
+}
+
+fn styled_range(
+    event: &Event,
+    range: Range<usize>,
+    content: &str,
+) -> Option<(Style, Range<usize>)> {
+    if let Event::Start(Tag::Item) = event {
+        let size = content[range.clone()]
+            .find(char::is_whitespace)
+            .unwrap_or(range.len());
+        return Some((Style::Marker, range.start..range.start + size));
+    }
+    style_of(event).map(|style| (style, range))
+}
+
+fn style_of(event: &Event) -> Option<Style> {
+    match event {
+        Event::Start(tag) => block_style(tag).or_else(|| inline_style(tag)),
+        Event::Code(_) => Some(Style::Code),
+        Event::Rule => Some(Style::Marker),
+        _ => None,
+    }
+}
+
+fn block_style(tag: &Tag) -> Option<Style> {
+    match tag {
+        Tag::Heading { level, .. } => Some(heading(*level)),
+        Tag::BlockQuote(_) => Some(Style::Quote),
+        Tag::CodeBlock(_) => Some(Style::Code),
+        _ => None,
+    }
+}
+
+fn inline_style(tag: &Tag) -> Option<Style> {
+    match tag {
+        Tag::Strong => Some(Style::Strong),
+        Tag::Emphasis => Some(Style::Emphasis),
+        _ => None,
+    }
+}
+
+fn heading(level: HeadingLevel) -> Style {
+    [Style::Heading1, Style::Heading2, Style::Heading3][(level as usize).min(3) - 1]
 }
