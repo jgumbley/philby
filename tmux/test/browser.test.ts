@@ -71,7 +71,7 @@ test('browser windows share one raw process, retain failures and disconnect duri
     await assert.rejects(w.adapter(`m.terminateBrowser('chrome',${JSON.stringify(views[0].pane)},${views[0].pid+1})`),/not the expected chrome/);
     await w.adapter(`m.terminateBrowser('chrome',${JSON.stringify(views[0].pane)},${views[0].pid})`);
     await until(async()=>JSON.parse(await w.adapter('console.log(JSON.stringify(m.browserViews()))'))[0]?.dead===true);
-    assert.match(await w.tmux('capture-pane','-p','-t',views[0].pane),/Pane is dead \(signal kill/);
+    assert.match(await w.tmux('capture-pane','-p','-t',views[0].pane),/Pane is dead \(signal (?:kill|9)\b/);
     assert.throws(()=>process.kill(views[0].pid,0),{code:'ESRCH'});
     const reopened=await open('ok');
     assert.deepEqual(reopened,{pane:views[0].pane,started:true});

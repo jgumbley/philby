@@ -3,11 +3,10 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, mkdtem
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { DateTime } from 'luxon';
+import { root } from './config.js';
 
-export const root = resolve(process.env.PHILBY_ROOT || fileURLToPath(new URL('../../', import.meta.url)));
-if(existsSync(join(root,'.env'))) process.loadEnvFile(join(root,'.env'));
+export { root };
 if(process.env.PHILBY_HOME) throw Error('PHILBY_HOME is no longer supported; use PHILBY_PANES_DIR for complete pane directories');
 export const panesRoot = resolve(process.env.PHILBY_PANES_DIR || join(root,'panes'));
 export const runtimeDir = join(tmpdir(), `philby-${process.getuid!()}-${createHash('sha256').update(panesRoot).digest('hex').slice(0,16)}`);

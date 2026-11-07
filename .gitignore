@@ -10,3 +10,4 @@ dist/
 *.WAV
 /*.provider
 /*.provider.disabled
+/.pi/

@@ -2,205 +2,186 @@ import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { models, modelChoices } from '../src/models.js';
-import { consultationDefaults, loadProviders, modelReference } from '../src/providers.js';
-import { getBuiltinModel } from '@earendil-works/pi-ai/providers/all';
+import { dirname, join } from 'node:path';
+import { createModels, fauxProvider, type Context, type OAuthCredential } from '@earendil-works/pi-ai';
+import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { configuredModels, models, modelChoices, modelScope, refreshModels } from '../src/models.js';
+import { modelReference } from '../src/providers.js';
 
-const template=readFileSync(new URL('../../openrouter.provider.example',import.meta.url),'utf8');
-const presets=['moonshotai/kimi-k3','z-ai/glm-5.2','z-ai/glm-5.3','z-ai/glm-5.3-flash','deepseek/deepseek-v4-pro-0813','deepseek/deepseek-v4.1-flash','deepseek/deepseek-v4.1-flash-1017','minimax/minimax-m3'];
+const localModel={id:'owner/flash-next-custom:q3',name:'Local Flash Next',reasoning:false,input:['text'],contextWindow:12288,maxTokens:2048,cost:{input:0,output:0,cacheRead:0,cacheWrite:0},compat:{supportsDeveloperRole:false,maxTokensField:'max_tokens'}};
 function fixture(t:TestContext) {
-  const directory=mkdtempSync(join(tmpdir(),'philby-providers-'));
+  const directory=mkdtempSync(join(tmpdir(),'philby-model-runtime-'));
   t.after(()=>rmSync(directory,{recursive:true,force:true}));
-  writeFileSync(join(directory,'openrouter.provider'),template.replace('API_KEY=','API_KEY=test-key'));
-  return {directory,env:{DEFAULT_MODEL:'openrouter/moonshotai/kimi-k3'}};
+  const options={authPath:join(directory,'auth.json'),modelsPath:join(directory,'models.json'),modelsStorePath:join(directory,'models-store.json'),allowModelNetwork:false};
+  writeFileSync(options.authPath,JSON.stringify({'test-local':{type:'api_key',key:'local-test-key'},'test-work':{type:'api_key',key:'work-test-key'}}));
+  writeFileSync(options.modelsPath,JSON.stringify({providers:{
+    'test-local':{baseUrl:'http://127.0.0.1:18000/v1',api:'openai-completions',apiKey:'unused-config-key',models:[localModel,{...localModel,id:'second-model',name:'Second local model'}]},
+    'test-work':{baseUrl:'https://work.example/v1',api:'openai-completions',models:[localModel]},
+    'test-unconfigured':{baseUrl:'https://missing.example/v1',api:'openai-completions',models:[{...localModel,id:'no-auth'}]},
+  }}));
+  return options;
 }
-test('provider files preserve exact catalog models, menu order, defaults and online variants',async t=>{
+function streamed(delta:unknown,finish_reason:string) {
+  const chunk={id:'test-response',choices:[{index:0,delta,finish_reason}]};
+  return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,{headers:{'content-type':'text/event-stream'}});
+}
+
+test('Pi runtime exposes every available model and preserves arbitrary local metadata',async t=>{
   const options=fixture(t);
-  for(const id of [...presets,'openai/gpt-5.5:online','x-ai/grok-4.3:online']) {
-    const config=await models(`openrouter/${id}`,options);
-    assert.deepEqual(config.model,{provider:'openrouter',modelId:id});
-    assert.equal(config.models.getModel('openrouter',id)?.id,id);
-    assert.deepEqual(modelChoices(config.models).map(choice=>choice.modelId),presets);
-  }
-  const config=await models(undefined,options);
-  assert.equal(config.model.modelId,'moonshotai/kimi-k3');
-  const model=config.models.getModel('openrouter','deepseek/deepseek-v4.1-flash-1017')!;
-  assert.equal(model.contextWindow,1048576);
-  assert.equal(model.maxTokens,393216);
-  assert.deepEqual(model.input,['text','image']);
-  assert.deepEqual(model.cost,{input:0.15,output:0.6,cacheRead:0.003,cacheWrite:0});
-  assert.deepEqual(consultationDefaults,{
-    ask:'openrouter/z-ai/glm-5.2',reason:'openrouter/openai/gpt-5.5',twitter:'openrouter/x-ai/grok-4.3:online',
-  });
-  for(const reference of Object.values(consultationDefaults)) assert.ok(await models(reference,options));
-  await assert.rejects(models('openrouter/missing-model',options),/unavailable/);
-  await assert.rejects(models('openrouter/missing-model:online',options),/unavailable/);
-  await assert.rejects(models('missing/z-ai/glm-5.3',options),/unavailable/);
-  await assert.rejects(models(undefined,{...options,env:{}}),/DEFAULT_MODEL/);
-  assert.deepEqual(modelReference('work/vendor/model'),{provider:'work',modelId:'vendor/model'});
+  const runtime=await configuredModels(options);
+  assert.ok(runtime instanceof ModelRuntime);
+  assert.equal(runtime.getError(),undefined);
+  const local=runtime.getModel('test-local',localModel.id)!;
+  assert.ok(local);
+  assert.equal(local.name,localModel.name);
+  assert.equal(local.contextWindow,12288);
+  assert.equal(local.maxTokens,2048);
+  assert.deepEqual(local.input,['text']);
+  assert.deepEqual(local.cost,localModel.cost);
+  assert.equal(local.baseUrl,'http://127.0.0.1:18000/v1');
+  const choices=await modelChoices(runtime);
+  assert.deepEqual(choices.filter(choice=>choice.provider.startsWith('test-')).map(({provider,modelId})=>({provider,modelId})),[
+    {provider:'test-local',modelId:localModel.id},
+    {provider:'test-local',modelId:'second-model'},
+    {provider:'test-work',modelId:localModel.id},
+  ]);
+  assert.ok(runtime.getModel('test-unconfigured','no-auth'));
+  assert.equal(await runtime.getAuth('test-unconfigured'),undefined);
+  await runtime.setRuntimeApiKey('openrouter','openrouter-test-key');
+  const upstream=await runtime.getAvailable('openrouter');
+  assert.ok(upstream.length>8);
+  const all=await modelChoices(runtime);
+  assert.deepEqual(all.filter(choice=>choice.provider==='openrouter').map(choice=>choice.modelId).sort(),upstream.map(model=>model.id).sort());
+});
+
+test('native shortlist patterns select available models without shrinking the catalog',async t=>{
+  const runtime=await configuredModels(fixture(t));
+  const before=await modelChoices(runtime);
+  const settings=SettingsManager.inMemory({enabledModels:[`test-work/${localModel.id}`,'test-local/**','test-local/second-model','test-unconfigured/*','missing/*']});
+  const result=await modelScope(runtime,settings);
+  assert.deepEqual(result.scopedModels.map(({model})=>`${model.provider}/${model.id}`),[
+    `test-work/${localModel.id}`,
+    `test-local/${localModel.id}`,
+    'test-local/second-model',
+  ]);
+  assert.equal(result.errors.length,2);
+  assert.ok(result.errors.some(error=>error.includes('test-unconfigured/*')));
+  assert.ok(result.errors.some(error=>error.includes('missing/*')));
+  assert.deepEqual(await modelChoices(runtime),before);
+  assert.deepEqual(await modelScope(runtime,SettingsManager.inMemory()),{scopedModels:[],errors:[]});
+});
+
+test('invalid native shortlist settings remain visible instead of silently hiding models',async t=>{
+  const options=fixture(t);
+  const runtime=await configuredModels(options);
+  const directory=dirname(options.authPath);
+  writeFileSync(join(directory,'settings.json'),'{"enabledModels":');
+  const result=await modelScope(runtime,SettingsManager.create(directory,directory));
+  assert.deepEqual(result.scopedModels,[]);
+  assert.ok(result.errors.some(error=>/JSON|parse|settings/i.test(error)));
+  assert.ok((await modelChoices(runtime)).some(choice=>choice.provider==='test-local'));
+});
+
+test('saved selections do not require a new-pane default and explicit references retain their complete ID',async t=>{
+  const options=fixture(t);
+  const unselected=await models(undefined,{...options,env:{DEFAULT_MODEL:'invalid-default'}});
+  assert.equal(unselected.model,undefined);
+  const selected=await models(`test-local/${localModel.id}`,{...options,env:{}});
+  assert.deepEqual(selected.model,{provider:'test-local',modelId:localModel.id});
+  await assert.rejects(models('test-local/absent',{...options,env:{}}),/unavailable/i);
+  await assert.rejects(models('absent/provider-model',{...options,env:{}}),/unavailable/i);
+  assert.deepEqual(modelReference('test-local/owner/model:quant'),{provider:'test-local',modelId:'owner/model:quant'});
   assert.throws(()=>modelReference('unqualified'),/provider\/model-id/);
 });
-test('filename identities scope credentials and requests independently of global credentials',async t=>{
-  const options=fixture(t);
-  writeFileSync(join(options.directory,'work.provider'),'TYPE=openrouter\nAPI_KEY="work-$literal#key"\nMODELS=z-ai/glm-5.3\n');
-  writeFileSync(join(options.directory,'ignored.provider.example'),'not configuration');
-  const config=await models('work/z-ai/glm-5.3',{...options,env:{OPENROUTER_API_KEY:'wrong-global-key'}});
-  assert.deepEqual(loadProviders(options.directory).map(provider=>provider.id),['openrouter','work']);
-  assert.deepEqual(modelChoices(config.models).at(-1)?.provider,'work');
-  for(const [provider,key] of [['openrouter','test-key'],['work','work-$literal#key']]) {
-    assert.equal((await config.models.getAuth(provider))?.auth.apiKey,key);
-    const model=config.models.getModel(provider,'z-ai/glm-5.3')!;
-    assert.equal(model.provider,provider);
-    let calls=0;
-    const response=await config.models.streamSimple(model,{messages:[{role:'user',content:'hello',timestamp:1}]},{
-      fetch:async(_url,init)=>{
-        calls++;
-        assert.equal(new Headers(init?.headers).get('authorization'),`Bearer ${key}`);
-        assert.equal(JSON.parse(String(init?.body)).model,'z-ai/glm-5.3');
-        return new Response('data: {"id":"test","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
-      },
-    }).result();
-    assert.notEqual(response.stopReason,'error',response.errorMessage);
-    assert.equal(calls,1);
-  }
+
+test('separate provider credentials reach their own endpoints and local tools round-trip',async t=>{
+  const runtime=await configuredModels(fixture(t));
+  const local=runtime.getModel('test-local',localModel.id)!;
+  const context:Context={messages:[{role:'user',content:'Call ping with ok',timestamp:1}],tools:[{name:'ping',description:'Echo a value',parameters:{type:'object',properties:{value:{type:'string'}},required:['value']}}]};
+  let calls=0;
+  const fetch:typeof globalThis.fetch=async(url,init)=>{
+    assert.equal(String(url),'http://127.0.0.1:18000/v1/chat/completions');
+    assert.equal(new Headers(init?.headers).get('authorization'),'Bearer local-test-key');
+    const body=JSON.parse(String(init?.body));
+    assert.equal(body.model,localModel.id);
+    assert.equal(body.stream,true);
+    assert.equal(body.tools[0].function.name,'ping');
+    assert.ok(body.max_tokens>0 && body.max_tokens<=local.maxTokens);
+    calls++;
+    if(calls===1) return streamed({role:'assistant',tool_calls:[{index:0,id:'call_ping',type:'function',function:{name:'ping',arguments:'{"value":"ok"}'}}]},'tool_calls');
+    assert.ok(body.messages.some((message:any)=>message.role==='assistant' && message.tool_calls?.[0].id==='call_ping'));
+    assert.ok(body.messages.some((message:any)=>message.role==='tool' && message.tool_call_id==='call_ping' && message.content==='pong'));
+    return streamed({role:'assistant',content:'Received pong'},'stop');
+  };
+  const first=await runtime.streamSimple(local,context,{fetch}).result();
+  assert.equal(first.stopReason,'toolUse',first.errorMessage ?? 'unexpected response');
+  const call=first.content.find(part=>part.type==='toolCall')!;
+  assert.equal(call.name,'ping');
+  assert.deepEqual(call.arguments,{value:'ok'});
+  const second=await runtime.streamSimple(local,{...context,messages:[...context.messages,first,{role:'toolResult',toolCallId:call.id,toolName:'ping',content:[{type:'text',text:'pong'}],isError:false,timestamp:2}]},{fetch}).result();
+  assert.equal(second.stopReason,'stop',second.errorMessage ?? 'unexpected response');
+  assert.deepEqual(second.content.filter(part=>part.type==='text').map(part=>part.text),['Received pong']);
+  assert.equal(calls,2);
+  const work=runtime.getModel('test-work',localModel.id)!;
+  const separate=await runtime.streamSimple(work,{messages:[]},{fetch:async(url,init)=>{
+    assert.equal(String(url),'https://work.example/v1/chat/completions');
+    assert.equal(new Headers(init?.headers).get('authorization'),'Bearer work-test-key');
+    assert.equal(JSON.parse(String(init?.body)).model,localModel.id);
+    return streamed({role:'assistant',content:'work'},'stop');
+  }}).result();
+  assert.equal(separate.stopReason,'stop',separate.errorMessage ?? 'unexpected response');
 });
-test('configuration errors fail before requests and never include credential values',async t=>{
+
+test('native OAuth refresh failures surface and preserve the stored credential',async t=>{
   const options=fixture(t);
-  const path=join(options.directory,'openrouter.provider');
-  for(const [source,expected] of [
-    ['TYPE=unknown\nAPI_KEY=secret-value\nMODELS=x',/unsupported TYPE/],
-    ['TYPE=openrouter\nAPI_KEY=\nMODELS=x',/API_KEY is required/],
-    ['TYPE=openrouter\nAPI_KEY=secret-value\nMODELS=',/MODELS/],
-    ['TYPE=openrouter\nAPI_KEY=secret-value\nMODELS=x,x',/MODELS/],
-    ['TYPE=openrouter\nAPI_KEY=secret-value\nMODELS=missing',/unavailable model/],
-    ['TYPE=openrouter\nAPI_KEY=secret-value\nMODELS=x\nTYPO=secret-value',/unsupported setting/],
-  ] as const) {
-    writeFileSync(path,source);
-    await assert.rejects(models(undefined,options),error=>{
-      assert.match(String(error),expected);assert.match(String(error),/openrouter.provider/);
-      assert.ok(!String(error).includes('secret-value'));return true;
-    });
-  }
-  rmSync(path);
-  await assert.rejects(models(undefined,options),/No provider files/);
-  writeFileSync(join(options.directory,'BAD.provider'),template);
-  await assert.rejects(models(undefined,options),/invalid provider filename/);
+  const runtime=await configuredModels(options);
+  const expired:OAuthCredential={type:'oauth',access:'expired-access',refresh:'retained-refresh',expires:0};
+  const provider=fauxProvider({provider:'test-oauth',models:[{id:'oauth-model'}]}).provider;
+  runtime.registerNativeProvider({...provider,auth:{oauth:{name:'Test OAuth',login:async()=>expired,refresh:async()=>{throw Error('refresh rejected');},toAuth:async credential=>({apiKey:credential.access})}}});
+  await runtime.login('test-oauth','oauth',{prompt:async()=>{throw Error('unexpected prompt');},notify:()=>{}});
+  await assert.rejects(runtime.getAuth('test-oauth'),/OAuth refresh failed/i);
+  const result=await runtime.streamSimple(runtime.getModel('test-oauth','oauth-model')!,{messages:[]}).result();
+  assert.equal(result.stopReason,'error');
+  assert.match(result.errorMessage ?? '',/OAuth refresh failed/i);
+  const stored=JSON.parse(readFileSync(options.authPath,'utf8'));
+  assert.deepEqual(stored['test-oauth'],expired);
+  assert.equal(stored['test-local'].key,'local-test-key');
 });
-test('deterministic test provider requires no production configuration',async()=>{
-  const config=await models(undefined,{directory:'/not-a-directory',env:{PHILBY_TEST_PROVIDER:'1'}});
+
+test('refresh reports provider errors without hiding healthy choices',async()=>{
+  const runtime=createModels();
+  runtime.setProvider(fauxProvider({provider:'healthy',models:[{id:'ready'}]}).provider);
+  runtime.setProvider({...fauxProvider({provider:'broken',models:[{id:'cached'}]}).provider,refreshModels:async()=>{throw Error('catalog unavailable');}});
+  const errors=await refreshModels(runtime);
+  assert.ok(errors.some(error=>error.includes('catalog unavailable')));
+  assert.ok((await modelChoices(runtime)).some(choice=>choice.provider==='healthy' && choice.modelId==='ready'));
+});
+
+test('a provider auth error is reported while healthy picker choices remain available',async()=>{
+  const runtime=createModels();
+  runtime.setProvider(fauxProvider({provider:'healthy',models:[{id:'ready'}]}).provider);
+  runtime.setProvider({...fauxProvider({provider:'broken',models:[{id:'unavailable'}]}).provider,auth:{apiKey:{name:'Unavailable test credentials',resolve:async()=>{throw Error('credential lookup failed');}}}});
+  const errors:Error[]=[];
+  const choices=await modelChoices(runtime,error=>errors.push(error));
+  assert.deepEqual(choices.map(({provider,modelId})=>({provider,modelId})),[{provider:'healthy',modelId:'ready'}]);
+  assert.equal(errors.length,1);
+  assert.match(errors[0].message,/broken:.*auth failed/i);
+  await assert.rejects(modelChoices(runtime),/broken:.*auth failed/i);
+});
+
+test('invalid upstream configuration remains diagnostic and explicit selection fails',async t=>{
+  const options=fixture(t);
+  writeFileSync(options.modelsPath,'{"providers":');
+  const runtime=await configuredModels(options);
+  assert.match(runtime.getError() ?? '',/JSON|parse|models/i);
+  await assert.rejects(models(`test-local/${localModel.id}`,{...options,env:{}}),/unavailable/i);
+});
+
+test('deterministic development models need no production configuration',async()=>{
+  const config=await models(undefined,{modelsPath:null,env:{PHILBY_TEST_PROVIDER:'1'}});
   assert.deepEqual(config.model,{provider:'test',modelId:'test'});
-  assert.deepEqual(modelChoices(config.models).map(({provider,modelId,label})=>({provider,modelId,label})),[
+  assert.deepEqual((await modelChoices(config.models)).map(({provider,modelId,label})=>({provider,modelId,label})),[
     {provider:'test',modelId:'test',label:'Test'},
     {provider:'test',modelId:'test-alternate',label:'Test alternate'},
   ]);
-});
-test('gateway uses Pi metadata and streams function calls through its configured endpoint',async t=>{
-  const options=fixture(t);
-  writeFileSync(join(options.directory,'work.provider'),'TYPE=openai-compatible\nBASE_URL=https://gateway.example/v1/inference/\nAPI_KEY=gateway-key\nCATALOG=openrouter\nMODELS=claude-sonnet-5-5=anthropic/claude-sonnet-5-5,agentworks/deepseek-v4-1-flash=deepseek/deepseek-v4.1-flash\n');
-  const config=await models('work/claude-sonnet-5-5',options);
-  const model=config.models.getModel('work','claude-sonnet-5-5')!;
-  const original=getBuiltinModel('anthropic','claude-sonnet-5-5');
-  assert.equal(model.contextWindow,original.contextWindow);
-  assert.equal(model.maxTokens,original.maxTokens);
-  assert.equal(model.name,original.name);
-  const deepseek=config.models.getModel('work','agentworks/deepseek-v4-1-flash')!;
-  const dsOriginal=getBuiltinModel('openrouter','deepseek/deepseek-v4.1-flash');
-  assert.equal(deepseek.id,'agentworks/deepseek-v4-1-flash');
-  assert.equal(deepseek.contextWindow,dsOriginal.contextWindow);
-  assert.equal(config.providerType,'openai-compatible');
-  let calls=0;
-  const result=await config.models.streamSimple(model,{
-    messages:[{role:'user',content:'Call ping',timestamp:1}],
-    tools:[{name:'ping',description:'A deterministic test tool',parameters:{type:'object',properties:{}}}],
-  },{fetch:async(url,init)=>{
-    calls++;
-    assert.equal(String(url),'https://gateway.example/v1/inference/chat/completions');
-    assert.equal(new Headers(init?.headers).get('authorization'),'Bearer gateway-key');
-    const body=JSON.parse(String(init?.body));
-    assert.equal(body.model,'claude-sonnet-5-5');
-    assert.equal(body.stream,true);
-    assert.equal(body.tools[0].function.name,'ping');
-    assert.ok(body.max_tokens>0 && body.max_tokens<=original.maxTokens);
-    const chunk={id:'test',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'call_ping',type:'function',function:{name:'ping',arguments:'{}'}}]},finish_reason:'tool_calls'}]};
-    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,{headers:{'content-type':'text/event-stream'}});
-  }}).result();
-  assert.equal(result.stopReason,'toolUse',result.errorMessage);
-  assert.equal(result.content.find(content=>content.type==='toolCall')?.name,'ping');
-  assert.equal(calls,1);
-});
-test('gateway rejects missing metadata and invalid endpoints before inference',async t=>{
-  const options=fixture(t);
-  const source='TYPE=openai-compatible\nBASE_URL=https://gateway.example/v1\nAPI_KEY=gateway-secret\nCATALOG=anthropic\nMODELS=claude-sonnet-5-5\n';
-  for(const [from,to,expected] of [
-    ['CATALOG=anthropic','CATALOG=',/CATALOG/],
-    ['CATALOG=anthropic','CATALOG=not-a-catalog',/CATALOG/],
-    ['MODELS=claude-sonnet-5-5','MODELS=unknown-model',/absent from the Pi catalog/],
-    ['https://gateway.example/v1','file:///tmp/model',/BASE_URL/],
-    ['https://gateway.example/v1','https://user:gateway-secret@gateway.example/v1',/BASE_URL/],
-  ] as const) {
-    writeFileSync(join(options.directory,'work.provider'),source.replace(from,to));
-    await assert.rejects(models('work/claude-sonnet-5-5',options),error=>{
-      assert.match(String(error),expected);assert.ok(!String(error).includes('gateway-secret'));return true;
-    });
-  }
-});
-test('OpenAI uses native OAuth Responses requests and preserve tool identity',async t=>{
-  const options=fixture(t);
-  writeFileSync(join(options.directory,'openai.provider'),'TYPE=openai\nAUTH=oauth\nMODELS=gpt-5.5\n');
-  const config=await models('openai/gpt-5.5',options);
-  const {ProviderCredentials}=await import('../src/credentials.js');
-  const credentials=new ProviderCredentials(options.directory);
-  const model=config.models.getModel('openai','gpt-5.5')!;
-  assert.equal(model.api,'openai-responses');
-  assert.equal(config.models.getProvider('openai')!.auth.apiKey,undefined);
-  assert.equal(await config.models.getAuth('openai'),undefined);
-  let requests=0;
-  const missing=await config.models.streamSimple(model,{messages:[]},{fetch:async()=>{requests++;throw Error('must not request');}}).result();
-  assert.equal(missing.stopReason,'error');
-  assert.equal(requests,0);
-  await credentials.modify('openai',async()=>({type:'oauth',access:'test-chatgpt-access',refresh:'test-chatgpt-refresh',expires:Date.now()+3600000}));
-  const item={type:'function_call',id:'fc_test',call_id:'call_test',name:'ping',arguments:'{}',status:'completed'};
-  const events=[
-    {type:'response.created',response:{id:'resp_test',status:'in_progress'}},
-    {type:'response.output_item.added',output_index:0,item},
-    {type:'response.output_item.done',output_index:0,item},
-    {type:'response.completed',response:{id:'resp_test',status:'completed',output:[item],usage:{input_tokens:1,output_tokens:1,total_tokens:2}}},
-  ];
-  const bodies:any[]=[];
-  const fetch:typeof globalThis.fetch=async(url,init)=>{
-    assert.equal(String(url),'https://api.openai.com/v1/responses');
-    assert.equal(new Headers(init?.headers).get('authorization'),'Bearer test-chatgpt-access');
-    const body=JSON.parse(String(init?.body));bodies.push(body);
-    assert.equal(body.store,false);assert.equal(body.stream,true);
-    assert.equal(body.model,'gpt-5.5');
-    for(const key of ['max_output_tokens','temperature','prompt_cache_options','prompt_cache_retention']) assert.equal(body[key],undefined);
-    assert.equal(body.input.some((item:any)=>item.type==='configuration_update'),false);
-    return new Response(events.map(event=>`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''),{headers:{'content-type':'text/event-stream'}});
-  };
-  const messages=[{role:'user' as const,content:'Call ping',timestamp:1}];
-  const tools=[{name:'ping',description:'Ping',parameters:{type:'object',properties:{}}}];
-  const result=await config.models.streamSimple(model,{messages,tools},{fetch,reasoning:'high',temperature:0.5,maxTokens:100}).result();
-  assert.equal(result.stopReason,'toolUse',result.errorMessage);
-  assert.equal(result.provider,'openai');
-  assert.equal(result.content.find(part=>part.type==='toolCall')?.id,'call_test|fc_test');
-  const next=await config.models.streamSimple(model,{tools,messages:[...messages,result,{role:'toolResult',toolCallId:'call_test|fc_test',toolName:'ping',content:[{type:'text',text:'pong'}],isError:false,timestamp:2}]},{fetch}).result();
-  assert.notEqual(next.stopReason,'error',next.errorMessage);
-  assert.ok(bodies[1].input.some((item:any)=>item.type==='function_call' && item.id==='fc_test' && item.call_id==='call_test'));
-  assert.equal(result.provider,'openai');
-  assert.ok(modelChoices(config.models).some(choice=>choice.provider==='openai'));
-});
-test('ChatGPT provider configuration rejects keys and unsupported authentication',async t=>{
-  const options=fixture(t);
-  for(const [source,expected] of [
-    ['TYPE=openai\nMODELS=gpt-5.5',/AUTH must be oauth/],
-    ['TYPE=openai\nAUTH=api-key\nMODELS=gpt-5.5',/AUTH must be oauth/],
-    ['TYPE=openai\nAUTH=oauth\nAPI_KEY=test-secret\nMODELS=gpt-5.5',/unsupported setting/],
-    ['TYPE=openai\nAUTH=oauth\nMODELS=missing',/unavailable model/],
-  ] as const) {
-    writeFileSync(join(options.directory,'openai.provider'),source);
-    await assert.rejects(models('openai/gpt-5.5',options),error=>{
-      assert.match(String(error),expected);assert.doesNotMatch(String(error),/test-secret/);return true;
-    });
-  }
 });

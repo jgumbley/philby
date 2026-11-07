@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
-import { InboxDoc } from '@earendil-works/pi-durable';
+import { createRegistry, Harness, InboxDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
+import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 const directory=mkdtempSync(join(tmpdir(),'philby-test-'));
 process.env.PHILBY_ROOT=directory;process.env.PHILBY_PANES_DIR=join(directory,'panes');
 writeFileSync(join(directory,'PANE.md'),'shared-pane-guidance');
@@ -47,6 +48,32 @@ test('a missing saved provider fails without replacing the conversation or retai
     assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
     assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Keep the saved provider selection');
   }finally{await reopened.close();}
+});
+test('reopening uses the saved model and history without evaluating the new-pane default',async()=>{
+  const configured=fixture();
+  const p=await Pane.open('lazy-default',configured.models,model);
+  const id=p.conversation.id;
+  await p.operation({op:'memory',field:'notes',content:'Keep this memory'});
+  assert.equal((await (await p.conversation.submit({type:'input',content:'Keep this conversation'},ctx)).wait(ctx)).status,'done');
+  const history=(await p.conversation.context(ctx)).messages;
+  await p.close();
+  const reopened=await Pane.open('lazy-default',configured.models,()=>{throw Error('default must not be read');});
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
+    assert.deepEqual((await reopened.conversation.context(ctx)).messages,history);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Keep this memory');
+  }finally{await reopened.close();}
+});
+test('an unavailable new-pane default leaves no saved root conversation',async()=>{
+  const configured=fixture();
+  await assert.rejects(Pane.open('invalid-default',configured.models,()=>({provider:'missing',modelId:'unavailable'})),/Model unavailable: missing\/unavailable/);
+  const harness=await Harness.open(await openNodeSqliteStorage(join(paths('invalid-default').state,'durable.sqlite')),{models:configured.models,registry:createRegistry()},ctx);
+  try {assert.equal(await harness.conversation(ROOT_CONVERSATION_ID,ctx),undefined);}
+  finally{await harness.close(ctx);}
+  const reopened=await Pane.open('invalid-default',configured.models,()=>model);
+  try {assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);}
+  finally{await reopened.close();}
 });
 test('provider switching preserves running tools, queued input, memory and the saved conversation',async()=>{
   const effect=join(directory,'model-effect'),release=join(directory,'model-release');

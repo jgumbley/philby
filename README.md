@@ -9,17 +9,17 @@ The kernel provides continuity, communication and control. Panes build small reu
 Use Node 22.19 or newer, npm, GNU Make, bash and tmux on macOS or Linux. Clone this repository, enter its directory, then run:
 
 ```sh
+make deps
 make provider-setup
 ```
 
-Set `API_KEY` in the generated `openrouter.provider`. The generated `.env` selects `DEFAULT_MODEL=openrouter/moonshotai/kimi-k3` for new panes. Setup reports missing credentials; it does not log in or call a model.
+Setup creates a missing `.env`, with an empty `DEFAULT_MODEL`, and a private `.pi/agent/` directory. Configure providers through Pi as described below, list them with `make -C shared provider-models`, and set `DEFAULT_MODEL=provider/model-id` before creating a new pane. Setup preserves existing configuration.
 
 ```sh
-make deps
 make
 ```
 
-`make deps` installs the pinned npm lockfile. `make` builds the application and opens the create/open pane screen in tmux. With no existing panes it starts at pane creation; no agent starts until you create or select a pane. Every pane is an ordinary workspace, with no built-in coordinator. `/model` selects and saves a pane's model. Saved panes retain their selection when reopened. Unknown models and missing credentials fail explicitly; Philby does not substitute another model.
+`make deps` installs the resolved npm lockfile. Dependency declarations follow npm `latest`; `make deps-update` refreshes the lockfile and installation. `make` builds the application and opens the create/open pane screen in tmux. With no existing panes it starts at pane creation; no agent starts until you create or select a pane. Every pane is an ordinary workspace, with no built-in coordinator. `/model` selects and saves a pane's model. Saved panes retain their selection when reopened. Unknown models and missing credentials fail explicitly; Philby does not substitute another model.
 
 ```sh
 make pane slug=research
@@ -37,35 +37,43 @@ In Kitty on macOS, startup installs Cmd-Option-Right to move forward or open the
 
 ## Providers
 
-Philby discovers root-level `*.provider` files in filename order. The filename identifies the provider: `openrouter.provider` supplies `openrouter`; `work.provider` supplies `work`. Each file uses dotenv syntax and is parsed independently as data, without shell execution or variable expansion. Provider files contain credentials and are ignored by Git; commit only credential-free `*.provider.example` templates.
+Philby uses Pi's `ModelRuntime` for providers, authentication, model catalogs and request handling. Its native Pi configuration lives inside this checkout:
 
-```dotenv
-TYPE=openrouter
-API_KEY=your-key
-MODELS=moonshotai/kimi-k3,z-ai/glm-5.2,z-ai/glm-5.3
+```text
+.pi/agent/models.json        Custom providers, endpoints and model definitions
+.pi/agent/auth.json          Pi-managed API keys and OAuth credentials
+.pi/agent/models-store.json  Pi-managed catalog cache
+.pi/agent/settings.json      Native Pi settings, including the model shortlist
 ```
 
-`TYPE` and `MODELS` are required. Supported types are `openrouter`, `openai-compatible` and `openai`. OpenRouter and compatible gateways require `API_KEY`; native OpenAI uses `AUTH=oauth` for ChatGPT sign-in. OpenRouter and gateway files can use separate credentials. Native OpenAI uses the fixed filename `openai.provider` and Pi's `openai` identity. Unsupported settings, types and model IDs fail explicitly. Provider loading uses the installed model catalog without network discovery.
+Every pane, consultation helper and provider command uses this directory. Philby sets `PI_CODING_AGENT_DIR` to its absolute path, overriding an inherited directory setting. File configuration is independent of `~/.pi/agent`; provider environment variables remain supported. Each checkout can configure its own providers, shared by all its panes. The `agent` subdirectory keeps Pi's agent settings separate from its project-level `.pi/settings.json`.
 
-For ChatGPT subscription access, copy `openai.provider.example` to `openai.provider`, choose models available to your account, then run:
+The live `.pi/` directory is Git-ignored. Keep credential-free examples in the repository; Pi owns credential storage, permissions and token refresh.
+
+Use Pi's native login interface for subscriptions or stored API keys:
 
 ```sh
-make -C shared provider-login PROVIDER=openai
+make provider-login
 ```
 
-The helper requires an interactive terminal and prints a browser sign-in link. Complete the browser flow; Pi receives the local callback, or accepts the final redirect URL at the prompt. It uses Pi's native OpenAI provider and public Responses API, with Philby identified as the application. This keeps the existing Philby conversation, tools and memory. No Codex CLI or existing Codex credential import is involved. The login target exists only in `shared/Makefile`.
+This launches the installed native Pi with the same checkout configuration. Run `/login` inside Pi and select the provider; Pi handles the browser flow and stores credentials in `.pi/agent/auth.json`. Plain `npx pi` uses Pi's own directory selection, so use the Make target when authenticating Philby. ChatGPT subscription models use the `openai` provider. OpenRouter also accepts its normal `OPENROUTER_API_KEY` environment variable. Philby does not maintain a separate login flow or credential store.
 
-OAuth credentials and the installation identifier are stored in root `.state/providers.sqlite`, ignored by Git and restricted to the current user. All panes in this installation share this credential store. Pi refreshes tokens through serialized SQLite transactions; refresh failures surface and retain the saved credential. Missing OAuth credentials never select an API key from the environment. Re-run the login helper to reconnect an account. Cleanup retains the credentials.
+```sh
+make -C shared provider-models
+make -C shared provider-models PROVIDER=openrouter
+```
 
-After adding or editing a provider file, close and reopen the pane, then use `/model` to select a model under `openai`. To make it the default for new panes, set `DEFAULT_MODEL=openai/gpt-5.5` in root `.env`. A saved selection remains unchanged. The configured model list is a local catalogue, not a guarantee of account access; the service verifies access on inference.
+The helper refreshes through Pi and lists available chat models with their provider IDs and context/output limits. Provider errors are printed separately while healthy model entries remain visible; errors make the command exit nonzero. `/model` uses Pi's native picker with the same runtime. Type to search by provider, model ID or name. Availability follows Pi's authentication and catalog rules; the upstream service still decides whether an individual request is allowed.
 
-For an OpenAI-compatible gateway, copy `gateway.provider.example` to a named provider file. Set `BASE_URL` to the API prefix before `/chat/completions`, and `CATALOG` to the Pi catalog containing the exact IDs in `MODELS` (for example `anthropic`). Pi supplies model names, context/output limits and cost estimates; the estimates are not gateway billing rates. The adapter uses text chat and function tools, without provider-specific thinking controls. Unknown catalog entries fail instead of inventing limits. `make -C shared provider-models PROVIDER=name` lists the gateway's `/models` response using that file's credentials.
+Set `enabledModels` in `.pi/agent/settings.json` to show a shortlist when opening `/model`. Entries use Pi's native exact IDs or wildcard patterns, such as `openrouter/z-ai/*` and `llama-local/**`. Use `**` when a model ID contains slashes. Press Tab in the picker to switch between `scoped` and `all` models. The full catalog stays available, and existing pane selections are preserved. With no shortlist, the picker shows all available models. Settings are read each time the picker opens; malformed settings and unmatched patterns are reported.
 
-`MODELS` is an ordered, comma-separated model picker list. OpenRouter's complete supported catalog remains available to saved selections and explicit consultation requests; gateways and ChatGPT connections expose only the listed models. Labels and model metadata come from the installed library, with the existing DeepSeek October 17 metadata adjustment retained for OpenRouter. Explicit OpenRouter `:online` variants remain supported.
+For a work gateway or local server, add its provider to `.pi/agent/models.json` using the standard [Pi model configuration](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md). The credential-free [models.json.example](models.json.example) shows a local OpenAI-compatible server. Merge the relevant entry into this checkout's `.pi/agent/models.json`, replace `your-loaded-model` with the exact server model ID, and set context/output limits to the server's actual capacity. The example's `local` key is a dummy value for an unauthenticated loopback server. For an authenticated gateway, use Pi's credential configuration or environment interpolation for the real key. Pi reserves 4,096 context tokens beyond its prompt estimate when limiting output. Size the server for Philby's instructions, conversation, that reserve and the reply; an 8,192-token context can leave only one output token. The example uses 32,768, which must match the actual server allocation.
 
-Root `.env` selects the default with `DEFAULT_MODEL=provider/model-id`. The first slash separates provider identity from the full model ID, so `openrouter/z-ai/glm-5.3` selects GLM 5.3. Changing the default affects new panes; existing panes retain their saved provider and model. Keep provider filenames stable: removing or renaming a saved pane's provider causes an explicit startup error without replacing its conversation. Close and reopen panes to load configuration changes.
+Custom model IDs do not need to appear in Pi's bundled catalog. Use provider IDs such as `work` or `llama-local` consistently because saved panes retain their exact provider/model selection. Pi supplies built-in provider catalogs, caching, compatibility handling and supported discovery; a compatible endpoint's `/models` response does not necessarily include every piece of model metadata.
 
-`make provider-setup` copies `.env.example` and `openrouter.provider.example` to their runtime filenames when missing. Existing files are left untouched. There is no automatic migration: put API keys in the provider file, use the shared login helper for OAuth, and set `DEFAULT_MODEL` in `.env`. `OPENROUTER_API_KEY` and `PI_MODEL_ID` are no longer runtime settings. Provider files are reread when panes start; restart Philby after changing instance settings.
+Root `.env` selects the default for new panes with `DEFAULT_MODEL=provider/model-id`. The first slash separates the provider from the complete model ID. Reopening a saved pane keeps its selection even when the new-pane default has changed or is absent. An unavailable saved model is reported explicitly; Philby does not replace the conversation or silently choose another model. Model changes preserve conversation, memory and queued work.
+
+Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read. Setup does not import credentials or configuration from the home directory or legacy files, and preserves existing checkout configuration. Configure the required providers with `make provider-login` and `.pi/agent/models.json` before reopening existing panes. Consultation helpers use the same runtime; they do not add synthetic model aliases.
 
 ## Instructions and tools
 
@@ -171,7 +179,7 @@ Choose `intervalMs` (an integer of at least 1000) or `daily` (`HH:mm`), with an 
 | `shared/google-workspace/` | Read-only Google Chat, Docs, Sheets, Slides and Drive tools using gogcli | [Google Workspace](shared/google-workspace/README.md) |
 | `shared/graphwiki/` | Graph operations, command wrapper and Rust tests | [Graphwiki](shared/graphwiki/README.md) |
 
-The tmux adapter builds with the core. Browser tools have their own TypeScript build; OCR and slides run as Node scripts. These modules reuse the root npm dependencies, including pinned `puppeteer-core`, `scribe.js-ocr`, English OCR assets and `pptxgenjs`. Graphwiki owns its Cargo lockfile. Plain panes do not require a browser or Rust.
+The tmux adapter builds with the core. Browser tools have their own TypeScript build; OCR and slides run as Node scripts. These modules reuse the root npm dependencies, including `puppeteer-core`, `scribe.js-ocr`, English OCR assets and `pptxgenjs`. Graphwiki owns its Cargo lockfile. Plain panes do not require a browser or Rust.
 
 `shared/Makefile` exposes `browser-connect`, `browser-disconnect`, `browser-status`, `browser-tabs` and `browser-run`, plus the `wiki-*` tools. Run `make -C shared help` to discover them. Browser tools require `BROWSER=chrome|firefox` and an existing browser prepared for remote control. `browser-connect` opens a dedicated tmux service pane that owns one persistent Puppeteer connection; Chrome approval is needed when that connection starts. Later commands reuse it, preserving the browser's profile. `browser-run` executes a standard Puppeteer async function body supplied through a prompt file, `prompt`, or stdin. See the [browser setup and examples](shared/browser/README.md). Graphwiki requires Rust, Cargo and `flock`.
 
@@ -179,7 +187,7 @@ The browser service survives detaching and closing ordinary agent panes while id
 
 Shared `ocr` reads one complete local PDF, PNG or JPEG and writes English text to stdout, preserving page boundaries. Use `make -C shared ocr INPUT=/absolute/path/document.pdf`; add `OUTPUT=/absolute/path/new-text.txt` to create a file without overwriting an existing one. It runs directly with local model assets and exits after cleanup. `ocr-diagnose` checks dependencies without reading a document. Download or export browser files separately before invoking OCR. See [OCR usage and limitations](shared/ocr/README.md).
 
-Shared `ask`, `reason` and `twitter` provide fresh consultations without local tools or pane context. They share the instance provider configuration and the same prompt inputs. Override `ASK_MODEL`, `REASON_MODEL` or `TWITTER_MODEL` in root `.env` or the command environment using `provider/model-id`. Their defaults are `openrouter/z-ai/glm-5.2`, `openrouter/openai/gpt-5.5`, and `openrouter/x-ai/grok-4.3:online`, respectively. Ordinary consultations retain explicit `:online` support.
+Shared `ask`, `reason` and `twitter` provide fresh consultations without local tools or pane context. They share the instance provider configuration and the same prompt inputs. Override `ASK_MODEL`, `REASON_MODEL` or `TWITTER_MODEL` in root `.env` or the command environment using `provider/model-id`. Their defaults are `openrouter/z-ai/glm-5.2`, `openrouter/openai/gpt-5.5`, and `openrouter/x-ai/grok-4.3`, respectively. The selected model must be available through Pi.
 
 Shared `slides-generate` creates a local PPTX from an asynchronous JavaScript body receiving a PptxGenJS `pptx` instance. Use `make -C shared slides-generate PROMPT_FILE=/absolute/path/deck.js OUTPUT=/absolute/path/deck-v1.pptx`. The wrapper saves the result exclusively; choose a new output filename for each revision. Branding, masters and layout functions belong in the calling pane's source. `slides-diagnose` verifies local serialization without a browser, model provider or Google account. See [Slides usage and example](shared/slides/README.md).
 

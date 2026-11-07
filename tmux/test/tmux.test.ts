@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 const directory=mkdtempSync(join(tmpdir(),'philby-tmux-'));
 const socket=`philby-test-${process.pid}`;
 const root=resolve('.');
-const env={...process.env,PHILBY_PANES_DIR:join(directory,'panes'),PHILBY_TMUX_SOCKET:socket,PHILBY_TEST_PROVIDER:'1',PHILBY_DETACHED:'1'};
-function run(program:string,args:string[],input?:string):Promise<string> {
-  return new Promise((resolve,reject)=>{const p=spawn(program,args,{env,cwd:root,stdio:['pipe','pipe','pipe']});let out='',err='';p.stdout.on('data',c=>out+=c);p.stderr.on('data',c=>err+=c);p.on('error',reject);p.on('exit',code=>code===0?resolve(out):reject(Error(`${program} ${args.join(' ')}: ${code}\n${out}\n${err}`)));p.stdin.end(input);});
+const env={...process.env,PHILBY_PANES_DIR:join(directory,'panes'),PHILBY_TMUX_SOCKET:socket,PHILBY_TEST_PROVIDER:'1',PHILBY_DETACHED:'1',PI_OFFLINE:'1'};
+function run(program:string,args:string[],input?:string,environment:NodeJS.ProcessEnv=env):Promise<string> {
+  return new Promise((resolve,reject)=>{const p=spawn(program,args,{env:environment,cwd:root,stdio:['pipe','pipe','pipe']});let out='',err='';p.stdout.on('data',c=>out+=c);p.stderr.on('data',c=>err+=c);p.on('error',reject);p.on('exit',code=>code===0?resolve(out):reject(Error(`${program} ${args.join(' ')}: ${code}\n${out}\n${err}`)));p.stdin.end(input);});
 }
 const make=(...args:string[])=>run('make',['--no-print-directory',...args]);
 const tmux=(...args:string[])=>run('tmux',['-L',socket,...args]);
@@ -242,11 +242,19 @@ test('typed creation through selector preserves queued work and concurrent reope
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
 
-test('model picker cancels locally, preserves conversation and persists the selected model',async()=>{
+test('native model shortlist toggles all models, cancels locally and preserves selected model and history',async()=>{
+  const project=join(directory,'picker-root');
+  const agent=join(project,'.pi','agent');
+  mkdirSync(agent,{recursive:true});
+  for(const name of ['PANE.md','pane-types','shared','tmux']) symlinkSync(join(root,name),join(project,name));
+  writeFileSync(join(agent,'settings.json'),JSON.stringify({enabledModels:['test/test']}));
+  const environment={...env,PHILBY_ROOT:project};
+  const make=(...args:string[])=>run('make',['--no-print-directory',...args],undefined,environment);
   const screen=()=>tmux('capture-pane','-p','-t','philby:alpha');
   const picker=async()=>{
     await tmux('send-keys','-t','philby:alpha','/model','Enter');
     await until(async()=> (await screen()).includes('Choose a model'));
+    assert.match(await screen(),/Scope: all \| scoped/);
   };
   try {
     await make('pane','slug=alpha');
@@ -256,14 +264,19 @@ test('model picker cancels locally, preserves conversation and persists the sele
     const before=JSON.parse(await make('pane-capture','slug=alpha'));
     for(const key of ['Escape','C-c','C-d']) {
       await picker();
-      assert.match(await screen(),/→ Test\s/);
+      assert.match(await screen(),/→ ✓ test\s/);
+      assert.doesNotMatch(await screen(),/test-alternate/);
       await tmux('send-keys','-t','philby:alpha','Down',key);
       await until(async()=> (await screen()).includes('Model selection cancelled.'));
       assert.match(await screen(),/^alpha\s+test\s+ready/m);
       assert.deepEqual(JSON.parse(await make('pane-capture','slug=alpha')),before);
     }
     await picker();
-    await tmux('send-keys','-t','philby:alpha','Down','Enter');
+    await tmux('send-keys','-t','philby:alpha','test/test-alternate');
+    await until(async()=> (await screen()).includes('No matching models'));
+    await tmux('send-keys','-t','philby:alpha','Tab');
+    await until(async()=> /→\s+test-alternate/.test(await screen()));
+    await tmux('send-keys','-t','philby:alpha','Enter');
     await until(async()=> /^alpha\s+test-alternate\s+ready/m.test(await screen()));
     assert.match(await screen(),/Model set to test-alternate/);
     assert.deepEqual(JSON.parse(await make('pane-capture','slug=alpha')),before);
@@ -271,7 +284,8 @@ test('model picker cancels locally, preserves conversation and persists the sele
     await make('pane','slug=alpha');
     await until(async()=> /^alpha\s+test-alternate\s+ready/m.test(await screen()));
     await picker();
-    assert.match(await screen(),/→ Test alternate/);
+    await tmux('send-keys','-t','philby:alpha','Tab');
+    await until(async()=> /→ ✓ test-alternate/.test(await screen()));
     await tmux('send-keys','-t','philby:alpha','Enter');
     await until(async()=> (await screen()).includes('Model set to test-alternate'));
     await tmux('send-keys','-t','philby:alpha','after model selection','Enter');

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "llama-local": {
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "models": [
+        {
+          "id": "your-loaded-model",
+          "name": "Local model",
+          "contextWindow": 32768,
+          "maxTokens": 4000
+        }
+      ]
+    }
+  }
+}

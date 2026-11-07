@@ -1,5 +1,8 @@
 import { TuiMainScreen, ProcessTerminal, Input, SelectList, Editor, Markdown, Text, Container, Loader, matchesKey, type MarkdownTheme } from '@earendil-works/pi-tui';
-import { Pane, PlanMode, ctx, type ModelSelection } from './pane.js';
+import { AgentDoc, LiveDoc } from '@earendil-works/pi-durable';
+import { ModelRuntime, ModelSelectorComponent, initTheme } from '@earendil-works/pi-coding-agent';
+import { modelScope } from './models.js';
+import { Pane, PlanMode, ctx } from './pane.js';
 import { slug } from './store.js';
 const plain=(s:string)=>s;
 const dim=(s:string)=>`\x1b[90m${s}\x1b[39m`;
@@ -44,6 +47,7 @@ export function selectPane(open:(name:string,type?:string)=>Promise<void>,panes:
   });
 }
 export async function startTui(pane:Pane,quit:()=>Promise<void>) {
+  initTheme();
   const tui=new TuiMainScreen(new ProcessTerminal());
   const header=new Text(accent(pane.name),0,0);
   const history=new Container();
@@ -54,14 +58,17 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
   tui.addChild(header);tui.addChild(history);tui.addChild(activity);tui.addChild(info);tui.addChild(input);tui.setFocus(editor);
   let expanded=false;let panel='';let confirmQuit=false;let quitting=false;
   let loader:Loader|undefined;let startedAt=0;
-  let modelPicker:SelectList|undefined;let selectingModel=false;
-  const state=await pane.conversation.viewState(ctx);
-  const planState=await pane.harness.documentState(PlanMode,pane.conversation.id,ctx);
+  let modelPicker:ModelSelectorComponent|undefined;let selectingModel=false;
+  const state=await pane.conversation.watch(ctx);
+  let tail=state.value.entries.at(-1)?.id;
+  let transcript=await pane.conversation.context(ctx);
+  const planState=await pane.harness.watchDoc(PlanMode,pane.conversation.id,ctx);
+  const liveState=await pane.harness.watchDoc(LiveDoc,pane.conversation.id,ctx);
+  const agentState=await pane.harness.watchDoc(AgentDoc,pane.conversation.id,ctx);
   const render=()=>{
     history.clear();
-    const value=state.value;
     let reviewActive=false;
-    for(const e of value.entries) {
+    for(const e of transcript.entries) {
       if(e.kind==='pi.user') reviewActive=false;
       if(e.kind==='philby.startup') {reviewActive=false;history.addChild(new Text(dim('Opening checklist'),0,1));continue;}
       if(e.kind==='philby.review') {reviewActive=true;continue;}
@@ -79,7 +86,7 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       }
     }
     }
-    const live=value.docs['pi.live'] as any;
+    const live=liveState?.value;
     if(live?.run) {
       if(!loader) {
         startedAt=performance.now();
@@ -93,36 +100,44 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
     if(partial && !reviewActive) history.addChild(new Markdown(partial,0,1,theme));
     for(const tool of reviewActive ? [] : live?.tools || []) if(tool.status!=='done') history.addChild(new Text(dim(`› ${tool.name} ${tool.status}${expanded && tool.output ? '\n'+tool.output : ''}`),0,0));
     const unread=pane.store.updates().filter(u=>!u.seen).length;
-    const model=(value.docs['pi.agent'] as any)?.model;
+    const model=agentState?.value.model;
     const planActive=planState?.value?.active||false;
     header.setText(accent(pane.name)+dim(`  ${model?.modelId || ''}  ${live?.run?'working':'ready'}${planActive?'  PLAN MODE':''}  ${unread?`${unread} unread updates`:''}`));
     info.setText(confirmQuit ? 'Quit all Philby panes? [y/n]' : panel || dim('/help · /model · /memory · /checks · /plan · /tools · /updates · /quit · Esc stop · Ctrl-O tool output'));
     tui.requestRender();
   };
-  const unsub=state.subscribe(render);
-  const unsubPlan=planState?.subscribe(render);
+  state.start(async call=>{
+    if(call.kind!=='value' || pane.closing)return;
+    const next=call.value.entries.at(-1)?.id;
+    if(next!==tail) {transcript=await pane.conversation.context(ctx);tail=next;}
+    if(!pane.closing)render();
+  });
+  const documentWatches=[planState,liveState,agentState];
+  for(const watch of documentWatches)watch?.start(async()=>{if(!pane.closing)render();});
+  const watches=[state,...documentWatches];
+  for(const watch of watches)if(watch)void watch.closed.then(end=>{if(end.kind==='failed' || end.kind==='listener_error')pane.onError(end.error);});
   const timer=setInterval(render,1000);
   pane.onError=e=>{if(pane.closing){console.error(String(e));process.exitCode=1;}else{panel=String(e);render();}};
   const closeModelPicker=(message:string)=>{
-    modelPicker=undefined;input.clear();input.addChild(editor);tui.setFocus(editor);panel=message;render();
+    modelPicker?.dispose();modelPicker=undefined;input.clear();input.addChild(editor);tui.setFocus(editor);panel=message;render();
   };
   async function chooseModel() {
-    const selection=await pane.operation({op:'model'}) as ModelSelection;
-    const list=new SelectList(selection.choices.map((choice,index)=>({value:String(index),label:choice.label,description:choice.description})),8,selectTheme);
-    list.setSelectedIndex(selection.choices.findIndex(choice=>choice.provider===selection.current.provider && choice.modelId===selection.current.modelId));
-    list.onSelect=async item=>{
+    const runtime=pane.models;
+    if(!(runtime instanceof ModelRuntime)) throw Error('Model selection requires the Pi model runtime');
+    const selection=await modelScope(runtime);
+    const current=(await pane.conversation.agent(ctx)).model;
+    if(pane.closing) return;
+    const selected=current?runtime.getModel(current.provider,current.modelId):undefined;
+    modelPicker=new ModelSelectorComponent(tui,selected,runtime,selection.scopedModels,choice=>{
       if(selectingModel) return;
       selectingModel=true;
-      try {
-        const choice=selection.choices[Number(item.value)];
-        await pane.operation({op:'model',provider:choice.provider,modelId:choice.modelId});
-        closeModelPicker(`Model set to ${choice.modelId}; applies to the next model request.`);
-      } catch(error) {pane.onError(error);}
-      finally {selectingModel=false;}
-    };
-    list.onCancel=()=>{if(!selectingModel)closeModelPicker('Model selection cancelled.');};
-    modelPicker=list;editor.setText('');input.clear();input.addChild(list);tui.setFocus(list);
-    panel='Choose a model · ↑/↓ select · Enter applies · Esc cancels';render();
+      void pane.operation({op:'model',provider:choice.provider,modelId:choice.id})
+        .then(()=>closeModelPicker(`Model set to ${choice.id}; applies to the next model request.`))
+        .catch(error=>closeModelPicker(String(error)))
+        .finally(()=>{selectingModel=false;});
+    },()=>closeModelPicker('Model selection cancelled.'));
+    editor.setText('');input.clear();input.addChild(modelPicker);tui.setFocus(modelPicker);
+    panel=[...selection.errors,'Choose a model · Type to search · ↑/↓ select · Enter applies · Esc cancels'].join('\n');render();
   }
   async function submit(input:string) {
     if(quitting) return;
@@ -175,13 +190,14 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
     if(modelPicker) {
       if(selectingModel) return {consume:true};
       if(matchesKey(data,'escape') || matchesKey(data,'ctrl+c') || matchesKey(data,'ctrl+d')) {closeModelPicker('Model selection cancelled.');return {consume:true};}
-      return;
+      modelPicker.handleInput(data);
+      tui.requestRender();return {consume:true};
     }
     if(confirmQuit && (matchesKey(data,'escape') || matchesKey(data,'ctrl+c') || matchesKey(data,'ctrl+d'))) {confirmQuit=false;panel='Quit cancelled.';editor.setText('');render();return {consume:true};}
     if(matchesKey(data,'ctrl+o')) {expanded=!expanded;render();return {consume:true};}
     if(matchesKey(data,'escape')) {void pane.operation({op:'stop'}).catch(pane.onError);return {consume:true};}
     if(matchesKey(data,'ctrl+c') || matchesKey(data,'ctrl+d')) {void pane.close().catch(pane.onError);return {consume:true};}
   });
-  pane.onClose=()=>{loader?.stop();clearInterval(timer);unsub();unsubPlan?.();state.dispose();planState?.dispose();tui.stop();};
+  pane.onClose=()=>{modelPicker?.dispose();loader?.stop();clearInterval(timer);for(const watch of watches)void watch?.stop();tui.stop();};
   tui.start();render();
 }

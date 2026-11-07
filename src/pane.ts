@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, Harness, LiveDoc, InboxDoc, ResetEntry, type Conversation, type TaskId, type ToolRegistration } from '@earendil-works/pi-durable';
+import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, LiveDoc, InboxDoc, ResetEntry, type Conversation, type TaskId, type ToolRegistration } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -11,12 +11,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { envelope, lock, nextDeadline, prepare, paths, root, panesRoot, Store, type Check, type Envelope } from './store.js';
 import { listen, type Command } from './ipc.js';
-import { modelChoices, type ModelChoice } from './models.js';
+import { modelChoices, refreshModels, type ModelChoice } from './models.js';
+import type { ModelReference } from './providers.js';
 export { ctx };
-export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[]};
-export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
-export const Checks = defineDoc<{ items: Check[] }>({ kind:'philby.checks', version:1, scope:'conversation', history:'latest', fork:'initial', initial: () => ({ items:[] }) });
-export const PlanMode = defineDoc<{ active:boolean; plan:string }>({ kind:'philby.plan', version:1, scope:'conversation', history:'latest', fork:'initial', initial: () => ({ active:false, plan:'' }) });
+export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
+export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
+export const Checks = defineDoc<{ items: Check[] }>({ kind:'philby.checks', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ items:[] }) });
+export const PlanMode = defineDoc<{ active:boolean; plan:string }>({ kind:'philby.plan', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ active:false, plan:'' }) });
 export async function capture(conversation:Conversation, all=false) {
   if(!all) return (await conversation.context(ctx)).entries;
   const entries=[];
@@ -86,13 +87,13 @@ export class Pane {
   private closure?: Promise<void>;
   private boot = false;
   private readonly makefiles: Record<string,string>;
-  private constructor(readonly name: string, private readonly models: Models) {
+  private constructor(readonly name: string, readonly models: Models) {
     this.makefiles={shared:join(root,'shared','Makefile'),pane:join(paths(name).tools,'Makefile')};
   }
   private tools() {
     return Object.fromEntries(Object.entries(this.makefiles).map(([name,file])=>[name,readFileSync(file,'utf8')]));
   }
-  static async open(name: string, models: Models, model: {provider:string; modelId:string}) {
+  static async open(name: string, models: Models, model: ModelReference | (()=>ModelReference)) {
     const p = new Pane(name,models);
     p.release = lock(name);
     try {
@@ -119,8 +120,12 @@ export class Pane {
         section('plan-mode', async (input, context) => (await input.read.snapshot(PlanMode, input.conversationId, context))?.active ? PLAN_MODE_PROMPT : undefined),
         section('approved-plan', async (input, context) => { const doc = await input.read.snapshot(PlanMode, input.conversationId, context); return doc && !doc.active && doc.plan ? `Approved plan:\n${doc.plan}` : undefined; })
       ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
-      p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, env: () => p.env, onReport:e => p.onError(e)}, ctx);
-      p.conversation = await p.harness.root(ctx, {agent:{model, cwd:dirs.tools}});
+      p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
+      p.conversation = await p.harness.root(ctx, {init:async(tx,id)=>{
+        const initial=typeof model==='function'?model():model;
+        if(!models.getModel(initial.provider,initial.modelId)) throw Error(`Model unavailable: ${initial.provider}/${initial.modelId}`);
+        await configure(tx,id,{model:initial,cwd:dirs.tools});
+      }});
       const selected=(await p.conversation.agent(ctx)).model;
       if(!selected) throw Error('Saved conversation has no model');
       if(!models.getModel(selected.provider,selected.modelId)) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
@@ -140,15 +145,16 @@ export class Pane {
     switch(c.op) {
       case 'status': return {slug:this.name,pid:process.pid, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), checks:await this.harness.snapshot(Checks,this.conversation.id,ctx), updates:this.store.updates(), work:await this.harness.inspect(ctx)};
       case 'model': {
+        const errors=c.modelId===undefined?await refreshModels(this.models):[];
         if(c.modelId !== undefined) {
           if(typeof c.provider !== 'string' || typeof c.modelId !== 'string' || !this.models.getModel(c.provider,c.modelId)) throw Error(`Model unavailable: ${c.provider}/${c.modelId}`);
           await this.conversation.configure({model:{provider:c.provider,modelId:c.modelId}},ctx);
         }
         const current=(await this.conversation.agent(ctx)).model;
         if(!current) throw Error('Pane has no configured model');
-        const choices=modelChoices(this.models);
-        if(!choices.some(choice=>choice.provider===current.provider && choice.modelId===current.modelId)) choices.unshift({...current,label:current.modelId,description:'Current model'});
-        return {current,choices} satisfies ModelSelection;
+        const choices=await modelChoices(this.models,error=>errors.push(error.message));
+        if(!choices.some(choice=>choice.provider===current.provider && choice.modelId===current.modelId)) choices.unshift({...current,label:current.modelId,description:'Current model (unavailable)'});
+        return {current,choices,errors} satisfies ModelSelection;
       }
       case 'input': {
         const content = String(c.content ?? ''); if (!content.trim()) throw Error('Empty prompt');
@@ -163,9 +169,7 @@ export class Pane {
         finally { receiving.close(); }
       }
       case 'stop': {
-        const live = (await this.conversation.viewState(ctx));
-        const data = live.value.docs['pi.live'] as any;
-        live.dispose();
+        const data = await this.harness.snapshot(LiveDoc,this.conversation.id,ctx);
         if (data?.run?.taskId) {
           await this.harness.abortTask(data.run.taskId,ctx);
           await this.harness.waitForTask(data.run.taskId,ctx);
@@ -232,8 +236,7 @@ export class Pane {
           if(submission) {
             const result=await this.harness.abortSubmission(submission.id,ctx);
             if(result==='already_placed') {
-              const view=await this.conversation.viewState(ctx);
-              const live=view.value.docs['pi.live'] as any; view.dispose();
+              const live=await this.harness.snapshot(LiveDoc,this.conversation.id,ctx);
               if(live?.run?.inputs?.includes(submission.id)) await this.harness.abortTask(live.run.taskId,ctx);
             }
           }

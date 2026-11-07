@@ -7,7 +7,7 @@ export function request(name: string, command: Command): Promise<any> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(paths(name).socket);
     let data = '';
-    socket.setTimeout(command.op==='close'?90000:15000, () => socket.destroy(Error('Pane command timed out')));
+    socket.setTimeout(command.op==='close'?90000:command.op==='model'?30000:15000, () => socket.destroy(Error('Pane command timed out')));
     socket.on('connect', () => socket.write(JSON.stringify(command) + '\n'));
     socket.on('data', chunk => {
       data += chunk;
@@ -36,6 +36,7 @@ export async function listen(name: string, operation: (cmd: Command) => Promise<
       try {
         const command=JSON.parse(data.split('\n')[0]);
         if(command.op==='close') socket.setTimeout(90000);
+        if(command.op==='model') socket.setTimeout(30000);
         socket.end(JSON.stringify({ value: await operation(command) }) + '\n');
       }
       catch(e) { socket.end(JSON.stringify({ error: String(e) }) + '\n'); }

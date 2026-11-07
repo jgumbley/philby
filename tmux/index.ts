@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import { root, panesRoot, runtimeDir, prepare } from '../src/store.js';
+import { piAgentDir } from '../src/config.js';
 import { running } from '../src/ipc.js';
 import { installKittyNavigation } from './kitty.js';
 import { withTmuxPassthrough } from './kitty-route.js';
@@ -30,7 +31,7 @@ function paneList(format:string) {
 const quote=(s:string)=>`'${s.replaceAll("'", "'\\''")}'`;
 function launch(action:string,name?:string) {
   const keys=['PHILBY_TEST_PROVIDER'];
-  const env=['PHILBY_ROOT='+root,'PHILBY_PANES_DIR='+panesRoot,'PHILBY_TMUX_SOCKET='+server(),...keys.filter(k=>process.env[k]).map(k=>`${k}=${process.env[k]}`)];
+  const env=['PHILBY_ROOT='+root,'PHILBY_PANES_DIR='+panesRoot,'PHILBY_TMUX_SOCKET='+server(),'PI_CODING_AGENT_DIR='+piAgentDir,...keys.filter(k=>process.env[k]).map(k=>`${k}=${process.env[k]}`)];
   return ['env','-u','slug',...env,process.execPath,'--disable-warning=ExperimentalWarning',cli,action,...(name?[name]:[])].map(quote).join(' ');
 }
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));

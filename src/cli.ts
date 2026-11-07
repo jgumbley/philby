@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline';
 import { root, panesRoot, slug, Store, envelope, locked, lock, configured, paneTypes, paths } from './store.js';
 import { request, running } from './ipc.js';
 import { models } from './models.js';
-import { consultationDefaults } from './providers.js';
+import { consultationDefaults, modelReference } from './providers.js';
 import { Pane, capture, ctx } from './pane.js';
 import { selectPane, startTui } from './tui.js';
 import { openPane, openSelector, listViews, openShell, closeBrowsers, stopServer } from '../tmux/index.js';
@@ -88,7 +88,7 @@ async function main() {
   if(!selected) throw Error(`Supply slug=<pane> for ${command}, or run from a pane`);
   const name=slug(selected);
   if(command==='serve') {
-    const config=await models();const pane=await Pane.open(name,config.models,config.model);
+    const config=await models();const pane=await Pane.open(name,config.models,()=>config.model ?? modelReference(process.env.DEFAULT_MODEL));
     const close=()=>{void pane.close().catch(e=>{console.error(String(e));process.exitCode=1;});};
     for(const signal of ['SIGTERM','SIGINT','SIGHUP'] as const) process.on(signal,close);
     if(process.stdin.isTTY) await startTui(pane,()=>cleanup(pane));
