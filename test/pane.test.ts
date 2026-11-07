@@ -14,8 +14,8 @@ process.env.PHILBY_ROOT=directory;process.env.PHILBY_PANES_DIR=join(directory,'p
 writeFileSync(join(directory,'PANE.md'),'shared-pane-guidance');
 cpSync(new URL('../../pane-types',import.meta.url),join(directory,'pane-types'),{recursive:true});
 mkdirSync(join(directory,'shared'));writeFileSync(join(directory,'shared','Makefile'),'help:\n\t@echo shared-tool\n');
-const {Pane,Memory,Checks,ctx}=await import('../src/pane.js');
-const {envelope,Store,nextDeadline,paths,prepare}=await import('../src/store.js');
+const {Pane,Memory,ctx}=await import('../src/pane.js');
+const {envelope,Store,paths,prepare}=await import('../src/store.js');
 const {request}=await import('../src/ipc.js');
 const model={provider:'test',modelId:'test'};
 function fixture(responses: Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0]=[fauxAssistantMessage('done')], speed=10000) {
@@ -231,7 +231,7 @@ test('blank boot remains idle and unreadable instructions fail without retaining
   await assert.rejects(Pane.open('instructions-invalid',fixture().models,model),/EISDIR/);
   rmSync(file,{recursive:true});writeFileSync(file,'');writeFileSync(join(dirs.tools,'BOOT.md'),' \n\t');
   const f=fixture();const p=await Pane.open('instructions-invalid',f.models,model);
-  try {await p.tick();assert.equal(f.faux.state.callCount,0);assert.deepEqual((await p.harness.snapshot(Checks,p.conversation.id,ctx))?.items,[]);}finally{await p.close();}
+  try {await p.tick();assert.equal(f.faux.state.callCount,0);}finally{await p.close();}
 });
 test('startup queues behind saved user work and resumes its original durable task',async()=>{
   const f=fixture([fauxAssistantMessage('working '.repeat(100))],10);
@@ -253,7 +253,6 @@ test('startup queues behind saved user work and resumes its original durable tas
     assert.equal(entries.filter(e=>e.kind==='philby.startup').length,1);
     const inputs=(await r.conversation.context(ctx)).messages.filter(m=>m.role==='user').map(m=>JSON.stringify(m.content));
     assert.deepEqual(inputs.map(content=>content.includes('restore configured workspace')?'startup':content.includes('queued user work')?'queued':'first'),['first','queued','startup']);
-    assert.deepEqual((await r.harness.snapshot(Checks,r.conversation.id,ctx))?.items,[]);
     assert.deepEqual(await r.operation({op:'close'}),{closed:true});
     await r.close();assert.equal(readFileSync(join(dirs.tools,'closed'),'utf8'),'closed\nclosed\n');
   }finally{await r.close();}
@@ -354,16 +353,15 @@ test('updates are durable and passive',async()=>{
   const q=await Pane.open('updates',fixture().models,model);
   try {const updates=await q.operation({op:'updates',mark:true}) as any[];assert.equal(updates.length,1);assert.equal(updates[0].seen,false);assert.equal(q.store.updates()[0].seen,true);}finally{await q.close();}
 });
-test('close preserves queued work and review configuration',async()=>{
+test('close preserves queued work',async()=>{
   const f=fixture([fauxAssistantMessage('slow answer '.repeat(100)),fauxAssistantMessage('queued answer')],10);
   const p=await Pane.open('queue',f.models,model);
-  await p.operation({op:'check-set',check:{id:'daily',prompt:'review',daily:'09:00'}});
   await p.operation({op:'input',id:'one',content:'first'});
   await until(()=>f.faux.state.callCount>0);
   await p.operation({op:'input',id:'two',content:'second'});
   await p.close();
   const q=await Pane.open('queue',fixture([fauxAssistantMessage('resumed'),fauxAssistantMessage('follow up')]).models,model);
-  try {await q.conversation.waitForIdle(ctx);const text=JSON.stringify(await q.operation({op:'capture'}));assert.ok(text.includes('second'));assert.equal((await q.harness.snapshot(Checks,q.conversation.id,ctx))?.items.length,1);}finally{await q.close();}
+  try {await q.conversation.waitForIdle(ctx);const text=JSON.stringify(await q.operation({op:'capture'}));assert.ok(text.includes('second'));}finally{await q.close();}
 });
 test('unsafe side effect interrupted by close is not repeated',async()=>{
   const file=join(directory,'effect');
@@ -380,57 +378,18 @@ test('native tools use pane cwd and shared Make capabilities',async()=>{
   const p=await Pane.open('tools',f.models,model);
   try {await (await p.conversation.submit({type:'input',content:'tools'},ctx)).wait(ctx);const transcript=JSON.stringify(await p.operation({op:'capture'}));assert.ok(transcript.includes(paths('tools').tools));assert.ok(transcript.includes('shared-tool'));}finally{await p.close();}
 });
-test('review task coalesces missed deadlines and does not overlap',async()=>{
-  const f=fixture([fauxAssistantMessage('NO_CHANGE')]);const p=await Pane.open('review',f.models,model);
-  try {
-    await p.operation({op:'check-set',check:{id:'review',prompt:'inspect',intervalMs:60000}});
-    await p.conversation.commit(async tx=>{(await tx.doc(Checks,p.conversation.id)).items[0].next=Date.now()-1000000;},ctx);
-    await p.tick();await until(()=>f.faux.state.callCount===1);await p.conversation.waitForIdle(ctx);await p.tick();
-    const doc=await p.harness.snapshot(Checks,p.conversation.id,ctx);assert.ok(doc!.items[0].next>Date.now());assert.ok(doc!.items[0].task);
-    await p.operation({op:'check-pause',id:'review'});assert.equal((await p.harness.snapshot(Checks,p.conversation.id,ctx))?.items[0].paused,true);
-    await p.close();const q=await Pane.open('review',fixture().models,model);try{assert.equal((await q.harness.snapshot(Checks,q.conversation.id,ctx))?.items[0].paused,true);}finally{await q.close();}
-  }finally{await p.close();}
-});
-test('daily local deadlines across daylight saving and missed occurrences',()=>{
-  const c={daily:'09:00',timezone:'Europe/Isle_of_Man'};
-  assert.equal(new Date(nextDeadline(c,Date.parse('2026-03-28T10:00:00Z'))).toISOString(),'2026-03-29T08:00:00.000Z');
-  assert.equal(new Date(nextDeadline(c,Date.parse('2026-10-24T10:00:00Z'))).toISOString(),'2026-10-25T09:00:00.000Z');
-  assert.throws(()=>nextDeadline({...c,timezone:'invalid'},Date.now()),/timezone/);
-  assert.throws(()=>nextDeadline({...c,intervalMs:1},Date.now()),/Interval/);
-});
-
-
-test('stop current run keeps admitted follow-ups and pane available',async()=>{
+test('stop preserves follow-ups without automatically restarting them',async()=>{
   const f=fixture([fauxAssistantMessage('slow '.repeat(100)),fauxAssistantMessage('next response'),fauxAssistantMessage('still available')],10);
   const p=await Pane.open('stop',f.models,model);
   try {
     await p.operation({op:'input',content:'first'});await until(()=>f.faux.state.callCount===1);
     await p.operation({op:'input',content:'follow-up'});await p.operation({op:'stop'});
-    await until(()=>f.faux.state.callCount===2);
-    await p.conversation.waitForIdle(ctx);
-    assert.match(JSON.stringify(await p.operation({op:'capture'})),/follow-up/);
+    await p.tick();
+    assert.equal(f.faux.state.callCount,1);
+    assert.ok((await p.harness.inspect(ctx)).submissions.some(s=>s.status==='queued' && s.type==='input'));
     assert.equal((await (await p.conversation.submit({type:'input',content:'continue'},ctx)).wait(ctx)).status,'done');
   }finally{await p.close();}
 });
-test('review queued behind active work survives close and can be paused without consuming user work',async()=>{
-  const f=fixture([fauxAssistantMessage('working '.repeat(100))],10);
-  const p=await Pane.open('review-pending',f.models,model);
-  await p.operation({op:'input',content:'human work'});await until(()=>f.faux.state.callCount===1);
-  await p.operation({op:'check-set',check:{id:'pending',prompt:'review pending',intervalMs:60000}});
-  await p.conversation.commit(async tx=>{(await tx.doc(Checks,p.conversation.id)).items[0].next=0;},ctx);
-  await p.tick();
-  await until(async()=> (await p.harness.inspect(ctx)).submissions.some(s=>s.requestId?.startsWith('review:') ?? false));
-  await p.close();
-  const q=await Pane.open('review-pending',fixture([fauxAssistantMessage('resumed '.repeat(100))],10).models,model);
-  try {
-    await q.operation({op:'check-pause',id:'pending'});
-    const inspect=await q.harness.inspect(ctx);
-    assert.equal(inspect.submissions.filter(s=>s.requestId?.startsWith('review:')).length,0);
-    assert.ok(inspect.tasks.some(t=>t.record.kind==='pi.generation'));
-  }finally{await q.close();}
-});
-
-
 test('SIGKILL releases lifetime lock and unsafe tool intent recovers without replay',async()=>{
   const file=join(directory,'crash-effect');
   const moduleUrl=new URL('../src/pane.js',import.meta.url).href;
@@ -609,8 +568,6 @@ test('new session starts fresh context while preserving memory and history',asyn
     const file=join(paths('new-session').tools,'kept.txt');
     writeFileSync(file,'saved work');
     await p.operation({op:'memory',field:'notes',content:'important memory'});
-    await p.operation({op:'check-set',check:{id:'later',intervalMs:3600000,prompt:'review later'}});
-    const reviews=await p.operation({op:'checks'});
     const agent=await p.conversation.agent(ctx);
     await (await p.conversation.submit({type:'input',content:'first question'},ctx)).wait(ctx);
     await p.conversation.commit(async tx=>{for(let i=0;i<105;i++)await tx.appendEntry(p.conversation.id,{kind:'test.archive',data:{i}});},ctx);
@@ -623,7 +580,6 @@ test('new session starts fresh context while preserving memory and history',asyn
     assert.equal(after.entries[0].kind,'pi.reset');
     assert.deepEqual(await p.operation({op:'memory'}),{responsibilities:'',notes:'important memory',decisions:'',outstanding:'',sources:''});
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
-    assert.deepEqual(await p.operation({op:'checks'}),reviews);
     assert.deepEqual((await p.conversation.agent(ctx)).model,agent.model);
     assert.equal(p.conversation.id,conversationId);
     assert.equal(readFileSync(file,'utf8'),'saved work');
@@ -681,7 +637,8 @@ test('new session preserves queued work, pending deliveries and request identiti
     },ctx);
     await assert.rejects(p.operation({op:'new'}),/work is (queued|active)/);
     await p.tick();
-    await p.conversation.waitForIdle(ctx);
+    assert.equal(f.faux.state.callCount,0);
+    await (await p.conversation.submit({type:'continue'},ctx)).wait(ctx);
     assert.ok(JSON.stringify(await p.operation({op:'capture'})).includes('queued before reset'));
     const message=envelope('sender','new-queued','delivery before reset',{id:'stable-reset-delivery'});
     p.store.accept(message);

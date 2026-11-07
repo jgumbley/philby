@@ -67,13 +67,9 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
   const agentState=await pane.harness.watchDoc(AgentDoc,pane.conversation.id,ctx);
   const render=()=>{
     history.clear();
-    let reviewActive=false;
     for(const e of transcript.entries) {
-      if(e.kind==='pi.user') reviewActive=false;
-      if(e.kind==='philby.startup') {reviewActive=false;history.addChild(new Text(dim('Opening checklist'),0,1));continue;}
-      if(e.kind==='philby.review') {reviewActive=true;continue;}
+      if(e.kind==='philby.startup') {history.addChild(new Text(dim('Opening checklist'),0,1));continue;}
       for(const m of e.model || []) {
-      if(reviewActive && (m.role==='toolResult' && !m.isError || m.role==='assistant' && m.stopReason==='toolUse')) continue;
       if(m.role==='system') continue;
       if(m.role==='toolResult') {
         const output=textContent(m.content);
@@ -81,7 +77,7 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       } else {
         const text=textContent(m.content);
         if(m.role==='assistant' && m.errorMessage) history.addChild(new Text('! '+m.errorMessage,0,0));
-        if(text && text.trim() !== 'NO_CHANGE') history.addChild(new Markdown(m.role==='user'?`**you**  ${text}`:text,0,1,theme));
+        if(text) history.addChild(new Markdown(m.role==='user'?`**you**  ${text}`:text,0,1,theme));
         if(m.role==='assistant') for(const c of m.content) if(c.type==='toolCall') history.addChild(new Text(dim(`› ${c.name} ${expanded ? JSON.stringify(c.arguments) : ''}`),0,0));
       }
     }
@@ -97,13 +93,13 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       loader.setMessage(`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`);
     } else if(loader) {loader.stop();loader=undefined;activity.clear();}
     const partial=textContent(live?.generation?.message?.content);
-    if(partial && !reviewActive) history.addChild(new Markdown(partial,0,1,theme));
-    for(const tool of reviewActive ? [] : live?.tools || []) if(tool.status!=='done') history.addChild(new Text(dim(`› ${tool.name} ${tool.status}${expanded && tool.output ? '\n'+tool.output : ''}`),0,0));
+    if(partial) history.addChild(new Markdown(partial,0,1,theme));
+    for(const tool of live?.tools || []) if(tool.status!=='done') history.addChild(new Text(dim(`› ${tool.name} ${tool.status}${expanded && tool.output ? '\n'+tool.output : ''}`),0,0));
     const unread=pane.store.updates().filter(u=>!u.seen).length;
     const model=agentState?.value.model;
     const planActive=planState?.value?.active||false;
     header.setText(accent(pane.name)+dim(`  ${model?.modelId || ''}  ${live?.run?'working':'ready'}${planActive?'  PLAN MODE':''}  ${unread?`${unread} unread updates`:''}`));
-    info.setText(confirmQuit ? 'Quit all Philby panes? [y/n]' : panel || dim('/help · /model · /memory · /checks · /plan · /tools · /updates · /quit · Esc stop · Ctrl-O tool output'));
+    info.setText(confirmQuit ? 'Quit all Philby panes? [y/n]' : panel || dim('/help · /model · /memory · /plan · /tools · /updates · /quit · Esc stop · Ctrl-O tool output'));
     tui.requestRender();
   };
   state.start(async call=>{
@@ -153,7 +149,7 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       if(command==='/close') {await pane.close();return;}
       if(command==='/model') {await chooseModel();return;}
       if(command==='/stop') await pane.operation({op:'stop'});
-      else if(command==='/help') panel='/model — choose a model for this pane\n/memory [field] — inspect or edit saved memory\n/checks · /check {JSON} · /pause id · /resume id · /remove id\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — start a fresh session, preserving files, tools, memory and archived history\n/tools · /updates · /send slug message · /report slug message\n/steer message · /stop · /close · /quit — quit all panes after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.';
+      else if(command==='/help') panel='/model — choose a model for this pane\n/memory [field] — inspect or edit saved memory\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — start a fresh session, preserving files, tools, memory and archived history\n/tools · /updates · /send slug message · /report slug message\n/steer message · /stop · /close · /quit — quit all panes after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.';
       else if(command==='/memory') {
         const memory=await pane.operation({op:'memory'}) as Record<string,string>;
         if(rest && rest in memory) {editor.setText(`/save ${rest}\n${memory[rest]}`);panel=`Editing ${rest}. Enter saves; Shift-Enter adds lines.`;render();return;}
@@ -170,10 +166,8 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
       } else if(command==='/new') {
         if(rest) throw Error(`/new takes no arguments; got: ${rest}`);
         panel=JSON.stringify(await pane.operation({op:'new'}),null,2);
-      } else if(command==='/checks' || command==='/tools') panel=JSON.stringify(await pane.operation({op:command.slice(1)}),null,2);
+      } else if(command==='/tools') panel=JSON.stringify(await pane.operation({op:command.slice(1)}),null,2);
       else if(command==='/updates') panel=JSON.stringify(await pane.operation({op:'updates',mark:true}),null,2);
-      else if(command==='/check') panel=JSON.stringify(await pane.operation({op:'check-set',check:JSON.parse(rest)}),null,2);
-      else if(['/pause','/resume','/remove'].includes(command)) await pane.operation({op:command==='/remove'?'check-remove':'check-pause',id:rest,paused:command==='/pause'});
       else if(command==='/send' || command==='/report') {
         const to=parts.shift(),content=parts.join(' ');
         if(!to || !content.trim()) throw Error(`Use ${command} <receiving-pane> <message>`);

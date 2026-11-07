@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, LiveDoc, InboxDoc, ResetEntry, type Conversation, type TaskId, type ToolRegistration } from '@earendil-works/pi-durable';
+import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, LiveDoc, InboxDoc, ResetEntry, type Conversation, type ToolRegistration } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -9,14 +9,13 @@ import { readFileSync, rmSync, existsSync } from 'node:fs';
 import type { Server } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { envelope, lock, nextDeadline, prepare, paths, root, panesRoot, Store, type Check, type Envelope } from './store.js';
+import { envelope, lock, prepare, paths, root, panesRoot, Store, type Envelope } from './store.js';
 import { listen, type Command } from './ipc.js';
 import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
 export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
 export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
-export const Checks = defineDoc<{ items: Check[] }>({ kind:'philby.checks', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ items:[] }) });
 export const PlanMode = defineDoc<{ active:boolean; plan:string }>({ kind:'philby.plan', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ active:false, plan:'' }) });
 export async function capture(conversation:Conversation, all=false) {
   if(!all) return (await conversation.context(ctx)).entries;
@@ -60,18 +59,6 @@ const Startup = defineTask<{prompt:string}, {phase:'startup'}, null>({
   }},
   abort:async(_task,runtime,context)=>{await runtime.commit(()=>({status:'terminal',outcome:{status:'aborted'}}),context);}
 });
-const Reviews = defineTask<{ id:string; prompt:string }, { phase:'review' }, null>({
-  name:'philby.review', version:1, initial: () => ({phase:'review'}),
-  phases: {
-    review: async (task, runtime, context) => {
-      const conversation = (await runtime.conversation(runtime.conversationId, context))!;
-      const submission = await conversation.submit({ type:'input', whenBusy:'followUp', requestId:`review:${task.id}`, entry:{kind:'philby.review',data:{id:task.input.id}}, content:`Recurring review ${task.input.id}:\n${task.input.prompt}\nIf unchanged, answer exactly NO_CHANGE. Report meaningful changes, blockers or decisions here.` }, context);
-      await submission.wait(context);
-      await runtime.commit(() => ({status:'terminal', outcome:{status:'completed', result:null}}), context);
-    }
-  },
-  abort: async (_task, runtime, context) => { await runtime.commit(() => ({status:'terminal', outcome:{status:'aborted'}}), context); }
-});
 export class Pane {
   harness!: Harness;
   conversation!: Conversation;
@@ -105,7 +92,7 @@ export class Pane {
       p.store = new Store(name);
       p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:{...process.env, PHILBY_PANE:name, PHILBY_ROOT:root, PHILBY_PANES_DIR:panesRoot}});
       const registry = createRegistry(); registry.install(CodingTools);
-      registry.install(defineExtension({name:'philby', tasks:[Reviews,Startup], sections:[
+      registry.install(defineExtension({name:'philby', tasks:[Startup], sections:[
         section('pane', () => `Your pane is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_PANE, PHILBY_ROOT and PHILBY_PANES_DIR.`),
         section('pane-guidance', () => guidance || undefined),
         section('pane-scope', () => scope || undefined),
@@ -129,7 +116,7 @@ export class Pane {
       const selected=(await p.conversation.agent(ctx)).model;
       if(!selected) throw Error('Saved conversation has no model');
       if(!models.getModel(selected.provider,selected.modelId)) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
-      await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(Checks,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
+      await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       p.server = await listen(name, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
       p.boot=!!boot || startup;
@@ -143,7 +130,7 @@ export class Pane {
   async operation(c: Command): Promise<unknown> {
     if (this.closing) throw Error('Pane is closing');
     switch(c.op) {
-      case 'status': return {slug:this.name,pid:process.pid, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), checks:await this.harness.snapshot(Checks,this.conversation.id,ctx), updates:this.store.updates(), work:await this.harness.inspect(ctx)};
+      case 'status': return {slug:this.name,pid:process.pid, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.store.updates(), work:await this.harness.inspect(ctx)};
       case 'model': {
         const errors=c.modelId===undefined?await refreshModels(this.models):[];
         if(c.modelId !== undefined) {
@@ -174,7 +161,6 @@ export class Pane {
           await this.harness.abortTask(data.run.taskId,ctx);
           await this.harness.waitForTask(data.run.taskId,ctx);
         }
-        await this.wakeQueue();
         return {stopped:true};
       }
       case 'close': await this.close(); return {closed:true};
@@ -184,7 +170,6 @@ export class Pane {
         await this.conversation.commit(async tx => { const memory = await tx.doc(Memory,this.conversation.id); memory[c.field as keyof typeof memory] = String(c.content ?? ''); },ctx);
         return {saved:true};
       }
-      case 'checks': return this.harness.snapshot(Checks,this.conversation.id,ctx);
       case 'plan': return this.harness.snapshot(PlanMode,this.conversation.id,ctx);
       case 'plan-set': {
         const active = c.active;
@@ -218,31 +203,6 @@ export class Pane {
         },ctx);
         return {reset:true};
       }
-      case 'check-set': {
-        const value = c.check as Check;
-        if (!value?.id || !value.prompt?.trim()) throw Error('Review ID and prompt required');
-        if(value.intervalMs !== undefined && value.daily !== undefined) throw Error('Choose intervalMs or daily');
-        const check: Check = {id:value.id,prompt:value.prompt,timezone:value.timezone || 'Europe/Isle_of_Man',paused:!!value.paused,...(value.intervalMs !== undefined ? {intervalMs:value.intervalMs} : {daily:value.daily}),next:0};
-        check.next = nextDeadline(check,Date.now());
-        await this.conversation.commit(async tx => { const doc = await tx.doc(Checks,this.conversation.id); const old = doc.items.find(i=>i.id===check.id); if (old?.task) check.task=old.task; doc.items=doc.items.filter(i=>i.id!==check.id);doc.items.push(check); },ctx);
-        return check;
-      }
-      case 'check-pause': case 'check-remove': {
-        let task: number|undefined;
-        await this.conversation.commit(async tx => { const doc = await tx.doc(Checks,this.conversation.id);const check=doc.items.find(i=>i.id===c.id); if(!check) throw Error('Unknown review'); task=check.task; if(c.op==='check-remove') doc.items=doc.items.filter(i=>i.id!==c.id);else check.paused=c.paused !== false; },ctx);
-        if(task && (c.op==='check-remove' || c.paused !== false)) {
-          await this.harness.abortTask(task as TaskId,ctx);
-          const submission=await this.conversation.commit(tx=>tx.submissionByRequest(this.conversation.id,`review:${task}`),ctx);
-          if(submission) {
-            const result=await this.harness.abortSubmission(submission.id,ctx);
-            if(result==='already_placed') {
-              const live=await this.harness.snapshot(LiveDoc,this.conversation.id,ctx);
-              if(live?.run?.inputs?.includes(submission.id)) await this.harness.abortTask(live.run.taskId,ctx);
-            }
-          }
-        }
-        return {saved:true};
-      }
       case 'updates': return this.store.updates(!!c.mark);
       case 'tools': return this.tools();
       case 'capture': return capture(this.conversation,c.all===true);
@@ -255,32 +215,11 @@ export class Pane {
     this.ticking = this.pump().finally(() => {this.ticking=undefined;});
     return this.ticking;
   }
-  private async wakeQueue() {
-    const work=await this.harness.inspect(ctx);
-    if(work.tasks.some(t=>t.record.kind==='pi.generation')) return;
-    const queued=work.submissions.find(s=>s.status==='queued' && s.type==='input');
-    if(queued) await this.conversation.submit({type:'write',requestId:`drain:${queued.id}`,entry:{kind:'philby.queue-resumed',model:[]}},ctx);
-  }
   private async pump() {
     for (const e of this.store.pending()) {
       if(this.closing) return;
       if(e.kind==='input') await this.conversation.submit({type:'input',content:`[From ${e.from}]\n${e.content}`,requestId:`message:${e.id}`,whenBusy:e.mode},ctx);
       this.store.placed(e);
-    }
-    await this.wakeQueue();
-    const checks = await this.harness.snapshot(Checks,this.conversation.id,ctx);
-    for (const check of checks?.items || []) {
-      if(this.closing) return;
-      const task = check.task ? await this.harness.getTask(check.task as TaskId,ctx) : undefined;
-      if(task && task.state.status !== 'terminal') continue;
-      if(check.paused || check.next > Date.now()) continue;
-      await this.conversation.commit(async tx => {
-        const doc = await tx.doc(Checks,this.conversation.id);
-        const item = doc.items.find(i=>i.id===check.id);
-        if(!item || item.paused || item.next > Date.now() || item.task !== check.task) return;
-        item.task = await tx.createTask(Reviews,{id:item.id,prompt:item.prompt},{ownership:{kind:'conversation'},background:true});
-        item.next = nextDeadline(item,Date.now());
-      },ctx);
     }
   }
   close() {

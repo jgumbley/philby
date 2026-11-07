@@ -106,14 +106,12 @@ All pane directories are private and ignored by this repository. Clone or create
 
 ## Conversation, memory and messages
 
-Enter submits, Shift-Enter inserts a newline, and follow-ups queue while work is running. Escape or `/stop` cancels current work while preserving queued input. `/steer message` steers at the next model boundary. Ctrl-O expands tool output.
+Enter submits, Shift-Enter inserts a newline, and follow-ups queue while work is running. Escape or `/stop` cancels current work while preserving queued input. Philby does not automatically restart queued input after a stop or failed run; a new input can advance it through Pi’s normal submission handling. `/steer message` steers at the next model boundary. Ctrl-O expands tool output.
 
 | Command | Operation |
 | --- | --- |
 | `/model` | Select and save this pane's model |
 | `/memory`, `/memory notes` | Inspect or edit durable memory |
-| `/checks`, `/check {JSON}` | Inspect or configure recurring reviews |
-| `/pause id`, `/resume id`, `/remove id` | Manage reviews |
 | `/tools` | Inspect pane and shared Makefiles |
 | `/updates` | Read and mark passive reports |
 | `/send slug message` | Queue input in the receiving pane |
@@ -135,7 +133,7 @@ printf '1. Step one\n2. Step two\n' | make pane-plan-set slug=research ACTIVE=0
 
 `ACTIVE` must be exactly `0`, `1`, `true`, or `false`. A nonempty `PLAN` supplies the approved plan; otherwise use the usual `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin precedence. Exiting without replacement text preserves any previously saved plan. Reads of explicit prompt files fail visibly if unavailable.
 
-`/new` starts a fresh model context in the existing Durable conversation while retaining prior transcript entries, files, tools, instructions, durable memory, model selection and review schedules. Plan mode begins off with no approved plan in the fresh context. `/new` rejects while work is active, queued or awaiting mailbox delivery; it does not cancel work. Reopening preserves the fresh context. Add `ALL=1` to capture the full archived history in chronological order.
+`/new` starts a fresh model context in the existing Durable conversation while retaining prior transcript entries, files, tools, instructions, durable memory and model selection. Plan mode begins off with no approved plan in the fresh context. `/new` rejects while work is active, queued or awaiting mailbox delivery; it does not cancel work. Reopening preserves the fresh context. Add `ALL=1` to capture the full archived history in chronological order.
 
 ```sh
 make pane-new-session slug=research
@@ -155,22 +153,11 @@ Prompt precedence is `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin. Files and std
 
 Messages and reports require `slug` to identify the receiving pane. `from` identifies the sender; inside a pane it can be inferred from `PHILBY_PANE`, while commands run outside a pane must supply it. Acceptance means the receiving mailbox transaction has committed, including when that pane is closed. It does not mean the work is complete. Reuse the same stable `REQUEST_ID` for retries. Conflicting content for an ID is rejected within the receiving pane; there is no global ID registry. Reports remain passive.
 
-Reviews are opt-in:
-
-```sh
-printf '%s' '{"id":"hourly","intervalMs":3600000,"prompt":"Review outstanding work."}' | make pane-check-set slug=research
-make pane-check-pause slug=research ID=hourly
-make pane-check-pause slug=research ID=hourly PAUSED=false
-make pane-check-remove slug=research ID=hourly
-```
-
-Choose `intervalMs` (an integer of at least 1000) or `daily` (`HH:mm`), with an optional IANA `timezone`; the default is `Europe/Isle_of_Man`. Daily schedules follow local wall time across daylight saving. Reviews queue behind conversation, cannot overlap themselves and coalesce missed occurrences. Closing suspends them; reopening restores them. Unchanged reviews answer `NO_CHANGE`.
-
 ## Modules
 
 | Location | Responsibility | Documentation |
 | --- | --- | --- |
-| `src/`, `test/` | Conversations, memory, mailboxes, reviews, CLI and TUI | This README |
+| `src/`, `test/` | Conversations, memory, mailboxes, CLI and TUI | This README |
 | `tmux/` | Workspace adapter, configuration and terminal integration tests | [tmux](tmux/README.md) |
 | `shared/browser/` | Puppeteer tools for existing Chrome and Firefox sessions | [Browser](shared/browser/README.md) |
 | `shared/ocr/` | Local English text extraction from screenshots and PDFs | [OCR](shared/ocr/README.md) |

@@ -102,8 +102,6 @@ async function main() {
   }
   const op:Record<string,unknown>={op:command==='new-session'?'new':command};
   if(command==='memory' && process.env.FIELD) Object.assign(op,{field:process.env.FIELD,content:await prompt()});
-  if(command==='check-set') op.check=JSON.parse(await prompt());
-  if(command==='check-pause' || command==='check-remove') Object.assign(op,{id:process.env.ID,paused:process.env.PAUSED!=='false'});
   if(command==='plan-set') {
     const activeEnv=process.env.ACTIVE;
     if(activeEnv!=='0' && activeEnv!=='1' && activeEnv!=='true' && activeEnv!=='false') throw Error(`ACTIVE must be 0, 1, true, or false; got: ${activeEnv}`);

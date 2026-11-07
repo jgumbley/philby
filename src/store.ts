@@ -3,7 +3,6 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, mkdtem
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { DateTime } from 'luxon';
 import { root } from './config.js';
 
 export { root };
@@ -69,21 +68,6 @@ export function lock(name: string) {
   return () => db.close();
 }
 export type Envelope = { id: string; from: string; to: string; content: string; kind: 'input' | 'update'; mode: 'steer' | 'followUp' };
-export type Check = { id: string; prompt: string; timezone: string; intervalMs?: number; daily?: string; next: number; paused: boolean; task?: number };
-export function nextDeadline(check: Pick<Check, 'intervalMs'|'daily'|'timezone'>, after: number): number {
-  if (!DateTime.now().setZone(check.timezone).isValid) throw Error('Invalid timezone');
-  if (check.intervalMs !== undefined) {
-    if (!Number.isSafeInteger(check.intervalMs) || check.intervalMs < 1000) throw Error('Interval must be an integer of at least 1000 ms');
-    if (check.daily) throw Error('Choose intervalMs or daily');
-    return after + check.intervalMs;
-  }
-  if (!check.daily || !/^([01]\d|2[0-3]):[0-5]\d$/.test(check.daily)) throw Error('daily must be HH:mm');
-  const [hour, minute] = check.daily.split(':').map(Number);
-  const local = DateTime.fromMillis(after, { zone: check.timezone });
-  let next = local.set({ hour, minute, second: 0, millisecond: 0 });
-  if (next.toMillis() <= after) next = local.plus({ days: 1 }).set({ hour, minute, second: 0, millisecond: 0 });
-  return next.toMillis();
-}
 export class Store {
   db: DatabaseSync;
   constructor(readonly name: string) {
