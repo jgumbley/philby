@@ -13,6 +13,7 @@ import { envelope, lock, prepare, paths, root, panesRoot, Store, type Envelope }
 import { listen, type Command } from './ipc.js';
 import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
+import { harnessSettings } from './settings.js';
 export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
 export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
@@ -87,6 +88,7 @@ export class Pane {
       const dirs = prepare(name);
       const guidance=readFileSync(join(root,'PANE.md'),'utf8');
       const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8');
+      const settings=harnessSettings();
       p.tools();
       const boot=existsSync(join(dirs.tools,'BOOT.md')) ? readFileSync(join(dirs.tools,'BOOT.md'),'utf8').trim() : '';
       p.store = new Store(name);
@@ -107,7 +109,7 @@ export class Pane {
         section('plan-mode', async (input, context) => (await input.read.snapshot(PlanMode, input.conversationId, context))?.active ? PLAN_MODE_PROMPT : undefined),
         section('approved-plan', async (input, context) => { const doc = await input.read.snapshot(PlanMode, input.conversationId, context); return doc && !doc.active && doc.plan ? `Approved plan:\n${doc.plan}` : undefined; })
       ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
-      p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
+      p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, settings, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
       p.conversation = await p.harness.root(ctx, {init:async(tx,id)=>{
         const initial=typeof model==='function'?model():model;
         if(!models.getModel(initial.provider,initial.modelId)) throw Error(`Model unavailable: ${initial.provider}/${initial.modelId}`);

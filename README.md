@@ -42,7 +42,7 @@ Philby uses Pi's `ModelRuntime` for providers, authentication, model catalogs an
 .pi/agent/models.json        Custom providers, endpoints and model definitions
 .pi/agent/auth.json          Pi-managed API keys and OAuth credentials
 .pi/agent/models-store.json  Pi-managed catalog cache
-.pi/agent/settings.json      Native Pi settings, including the model shortlist
+.pi/agent/settings.json      Native Pi settings, including model shortlist and compaction
 ```
 
 Every pane, consultation helper and provider command uses this directory. Philby sets `PI_CODING_AGENT_DIR` to its absolute path, overriding an inherited directory setting. File configuration is independent of `~/.pi/agent`; provider environment variables remain supported. Each checkout can configure its own providers, shared by all its panes. The `agent` subdirectory keeps Pi's agent settings separate from its project-level `.pi/settings.json`.
@@ -73,6 +73,27 @@ Custom model IDs do not need to appear in Pi's bundled catalog. Use provider IDs
 Root `.env` selects the default for new panes with `DEFAULT_MODEL=provider/model-id`. The first slash separates the provider from the complete model ID. Reopening a saved pane keeps its selection even when the new-pane default has changed or is absent. An unavailable saved model is reported explicitly; Philby does not replace the conversation or silently choose another model. Model changes preserve conversation, memory and queued work.
 
 Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read. Configure the required providers through `make full-pi` and `.pi/agent/models.json` before reopening existing panes. Consultation helpers use the same runtime; they do not add synthetic model aliases.
+
+## Compaction
+
+Configure transcript compaction in `.pi/agent/settings.json` using Pi's native per-model settings. Merge the following example into the existing file for a model with a 32,768-token context:
+
+```json
+{
+  "compaction": {
+    "modelOverrides": {
+      "llama-local/qwen/qwen3.8-flash-next-exp": {
+        "reserveTokens": 8192,
+        "keepRecentTokens": 12000
+      }
+    }
+  }
+}
+```
+
+Keys are exact `provider/model-id` values. Pi resolves each model's override over ordinary compaction settings and its defaults; project settings in the checkout's `.pi/settings.json` retain native precedence. This example triggers compaction above approximately 24k context tokens and retains approximately 12k recent tokens plus a summary.
+
+Philby loads compaction settings when a pane process opens. Close and reopen the pane after editing them; switching models with `/model` applies the matching loaded profile. Explicit per-model profiles use foreground compaction. Philby supplies Durable's `backgroundTokens: 0` for those profiles; this is not a native `settings.json` field. Models without an explicit profile retain Durable's default background behaviour. Pi owns the compaction algorithm.
 
 ## Instructions and tools
 

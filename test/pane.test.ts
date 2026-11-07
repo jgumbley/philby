@@ -130,6 +130,58 @@ test('provider switching preserves running tools, queued input, memory and the s
     }finally{await reopened.close();}
   }finally{writeFileSync(release,'');await p.close();await other.close();}
 });
+test('compaction profiles follow model switches and reload when a pane reopens',async()=>{
+  const settingsDir=join(directory,'.pi','agent'),settingsFile=join(settingsDir,'settings.json');
+  mkdirSync(settingsDir,{recursive:true});
+  const previous=existsSync(settingsFile)?readFileSync(settingsFile,'utf8'):undefined;
+  const alternate={provider:'compaction-other',modelId:'owner/compact'};
+  const profiles={compaction:{modelOverrides:{
+    'test/test':{reserveTokens:8192,keepRecentTokens:12000},
+    [`${alternate.provider}/${alternate.modelId}`]:{reserveTokens:16384,keepRecentTokens:4000},
+  }}};
+  writeFileSync(settingsFile,JSON.stringify(profiles));
+  const first=fauxProvider({provider:'test',models:[{id:'test',contextWindow:32768,maxTokens:4000}],tokensPerSecond:10000});
+  first.setResponses([fauxAssistantMessage('first answer')]);
+  const second=fauxProvider({provider:alternate.provider,models:[{id:alternate.modelId,contextWindow:32768,maxTokens:4000}],tokensPerSecond:10000});
+  second.setResponses([fauxAssistantMessage('summary of older history'),fauxAssistantMessage('switched answer'),fauxAssistantMessage('next answer'),fauxAssistantMessage('reopened answer')]);
+  const models=createModels();models.setProvider(first.provider);models.setProvider(second.provider);
+  let p:Awaited<ReturnType<typeof Pane.open>>|undefined;
+  const seed=async(pane:Awaited<ReturnType<typeof Pane.open>>)=>{
+    for(let n=0;n<3;n++)await pane.conversation.submit({type:'write',entry:{kind:'fixture',model:[{role:'user',content:`history ${n}: ${'x'.repeat(24000)}`,timestamp:Date.now()}]}},ctx);
+  };
+  const submit=async(pane:Awaited<ReturnType<typeof Pane.open>>,content:string)=>{
+    assert.equal((await (await pane.conversation.submit({type:'input',content},ctx)).wait(ctx)).status,'done');
+    await pane.conversation.waitForIdle(ctx);
+  };
+  try {
+    p=await Pane.open('compaction-profile',models,model);
+    const id=p.conversation.id;
+    await seed(p);
+    await submit(p,'continue');
+    assert.equal(first.state.callCount,1);
+    assert.equal((await p.conversation.context(ctx)).head,undefined);
+    await p.operation({op:'model',...alternate});
+    await submit(p,'use the selected model');
+    const head=(await p.conversation.context(ctx)).head;
+    assert.ok(head);
+    assert.equal(second.state.callCount,2);
+    await submit(p,'continue after compaction');
+    assert.equal(second.state.callCount,3);
+    assert.deepEqual((await p.conversation.context(ctx)).head,head);
+    await p.close();p=undefined;
+    writeFileSync(settingsFile,JSON.stringify({compaction:{...profiles.compaction,enabled:false}}));
+    p=await Pane.open('compaction-profile',models,model);
+    assert.equal(p.conversation.id,id);
+    assert.deepEqual((await p.conversation.agent(ctx)).model,alternate);
+    await seed(p);
+    await submit(p,'settings changed while closed');
+    assert.equal(second.state.callCount,4);
+    assert.deepEqual((await p.conversation.context(ctx)).head,head);
+  }finally{
+    await p?.close();
+    if(previous===undefined)rmSync(settingsFile,{force:true});else writeFileSync(settingsFile,previous);
+  }
+});
 test('Makefile sources reach the first provider request and refresh after tools without reopening',async()=>{
   const dirs=prepare('live-tools');
   assert.equal(readFileSync(join(dirs.tools,'SCOPE.md'),'utf8'),'');
