@@ -48,7 +48,7 @@ test('standalone model runtime uses checkout configuration and credentials from 
   assert.equal(result.status,0,result.stderr);
 });
 
-test('native Pi login uses the checkout directory and propagates failures',t=>{
+test('full Pi uses the checkout directory and propagates failures',t=>{
   const f=fixture(t);
   const bin=join(f.directory,'bin');
   mkdirSync(bin);
@@ -56,7 +56,7 @@ test('native Pi login uses the checkout directory and propagates failures',t=>{
 console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),agent:process.env.PI_CODING_AGENT_DIR,key:process.env.PHILBY_CONFIG_TEST_KEY}));
 process.exitCode=17;
 `,{mode:0o755});
-  const launcher=fileURLToPath(new URL('../../shared/provider-login.mjs',import.meta.url));
+  const launcher=fileURLToPath(new URL('../../shared/full-pi.mjs',import.meta.url));
   const result=spawnSync(process.execPath,[launcher],{cwd:f.cwd,env:{...f.env,PATH:`${bin}${delimiter}${f.env.PATH || ''}`},encoding:'utf8',timeout:15000});
   assert.ifError(result.error);
   assert.equal(result.status,17,result.stderr);

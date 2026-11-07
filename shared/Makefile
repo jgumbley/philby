@@ -31,11 +31,10 @@ override export MAX_SLIDES := $(value MAX_SLIDES)
 BROWSER_TOOLS := browser-connect browser-disconnect browser-status browser-tabs browser-run
 WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse
 GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login google-workspace-diagnose google-workspace-read google-workspace-spaces google-workspace-messages google-workspace-export google-workspace-download google-workspace-check google-workspace-test
-.PHONY: help ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test provider-setup provider-login provider-models
+.PHONY: help ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
 help:
 	@echo 'provider-models [PROVIDER=name] — list available chat models from Pi'
-	@echo 'provider-setup — create a missing .env and checkout-local .pi/agent directory'
-	@echo 'provider-login — open native Pi using this checkout; run /login to authenticate'
+	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
 	@echo 'ask reason twitter — fresh independent consultations, no local tools or pane context'
 	@echo 'PROMPT_FILE (absolute or relative to current directory), prompt, or stdin; override *_MODEL'
 	@echo 'Browser: BROWSER=chrome|firefox is required; connect to an existing browser, never launch one'
@@ -90,6 +89,6 @@ wiki-check:
 	@$(MAKE) --no-print-directory -C "$(ROOT)/shared/graphwiki" check
 wiki-test:
 	@$(MAKE) --no-print-directory -C "$(ROOT)/shared/graphwiki" ci
-provider-setup provider-login provider-models:
+full-pi provider-models:
 	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build
 	@node --disable-warning=ExperimentalWarning "$(ROOT)/shared/$@.mjs"

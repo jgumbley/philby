@@ -9,7 +9,7 @@ export PROMPT
 override PLAN := $(value PLAN)
 export PLAN
 export PROMPT_FILE slug from REQUEST_ID MODE FIELD ID PAUSED MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
-.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps deps-update build check test check-all test-all help digest ingest quit cleanup ask reason twitter provider-setup provider-login
+.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-checks pane-check-set pane-check-pause pane-check-remove pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps deps-update build check test check-all test-all help digest ingest quit cleanup ask reason twitter full-pi
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -62,14 +62,13 @@ test-all: test
 	@$(MAKE) --no-print-directory -C shared/slides test
 	@$(MAKE) --no-print-directory -C shared/google-workspace test
 	@$(MAKE) --no-print-directory -C shared/graphwiki test
-provider-setup provider-login:
+full-pi:
 	@$(MAKE) --no-print-directory -C shared $@
 ask reason twitter: build
 	@$(MAKE) --no-print-directory -C shared $@
 help:
 	@echo 'deps-update — refresh the npm lockfile for package.json, then install the locked dependencies'
-	@echo 'provider-setup — create a missing .env and checkout-local .pi/agent directory'
-	@echo 'provider-login — open native Pi using this checkout; run /login to authenticate'
+	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
 	@echo 'make — create/open pane chooser; make pane slug=<slug> [TYPE=plain|graphwiki] — create or resume'
 	@echo 'Navigation: Ctrl-End / Ctrl-Home; macOS Kitty: Cmd-Option-Right / Cmd-Option-Left (requires allow_remote_control yes)'
 	@echo 'pane-new — select a saved pane or New pane; pane-list — saved agents and every live tmux view'

@@ -10,10 +10,9 @@ Use Node 22.19 or newer, npm, GNU Make, bash and tmux on macOS or Linux. Clone t
 
 ```sh
 make deps
-make provider-setup
 ```
 
-Setup creates a missing `.env`, with an empty `DEFAULT_MODEL`, and a private `.pi/agent/` directory. Configure providers through Pi as described below, list them with `make -C shared provider-models`, and set `DEFAULT_MODEL=provider/model-id` before creating a new pane. Setup preserves existing configuration.
+Configure providers through `make full-pi` as described below, then list them with `make -C shared provider-models`. Before creating a new pane, set `DEFAULT_MODEL=provider/model-id` in the environment or root `.env`. To use `.env` for the first time, copy `.env.example` to `.env` and edit it; preserve an existing file. Pi creates its configuration files under `.pi/agent/` as needed.
 
 ```sh
 make
@@ -50,13 +49,13 @@ Every pane, consultation helper and provider command uses this directory. Philby
 
 The live `.pi/` directory is Git-ignored. Keep credential-free examples in the repository; Pi owns credential storage, permissions and token refresh.
 
-Use Pi's native login interface for subscriptions or stored API keys:
+Open the complete native Pi interface with this checkout's configuration:
 
 ```sh
-make provider-login
+make full-pi
 ```
 
-This launches the installed native Pi with the same checkout configuration. Run `/login` inside Pi and select the provider; Pi handles the browser flow and stores credentials in `.pi/agent/auth.json`. Plain `npx pi` uses Pi's own directory selection, so use the Make target when authenticating Philby. ChatGPT subscription models use the `openai` provider. OpenRouter also accepts its normal `OPENROUTER_API_KEY` environment variable. Philby does not maintain a separate login flow or credential store.
+`make` opens Philby; `make full-pi` opens Pi's full UI, including its normal startup screen. Inside Pi, use `/login` to authenticate, `/logout` to remove a stored credential, or `/scoped-models` to edit the model shortlist. Pi handles authentication and stores credentials in `.pi/agent/auth.json`. For Codex subscription access, run `/login openai` and choose **Sign in with ChatGPT**. Plain `npx pi` uses Pi's own directory selection, so use `make full-pi` for this checkout. OpenRouter also accepts its normal `OPENROUTER_API_KEY` environment variable.
 
 ```sh
 make -C shared provider-models
@@ -73,7 +72,7 @@ Custom model IDs do not need to appear in Pi's bundled catalog. Use provider IDs
 
 Root `.env` selects the default for new panes with `DEFAULT_MODEL=provider/model-id`. The first slash separates the provider from the complete model ID. Reopening a saved pane keeps its selection even when the new-pane default has changed or is absent. An unavailable saved model is reported explicitly; Philby does not replace the conversation or silently choose another model. Model changes preserve conversation, memory and queued work.
 
-Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read. Setup does not import credentials or configuration from the home directory or legacy files, and preserves existing checkout configuration. Configure the required providers with `make provider-login` and `.pi/agent/models.json` before reopening existing panes. Consultation helpers use the same runtime; they do not add synthetic model aliases.
+Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read. Configure the required providers through `make full-pi` and `.pi/agent/models.json` before reopening existing panes. Consultation helpers use the same runtime; they do not add synthetic model aliases.
 
 ## Instructions and tools
 
