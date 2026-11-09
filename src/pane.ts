@@ -1,5 +1,5 @@
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, LiveDoc, InboxDoc, ResetEntry, type Conversation, type ToolRegistration } from '@earendil-works/pi-durable';
+import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, AgentDoc, LiveDoc, InboxDoc, ResetEntry, type Conversation, type ToolRegistration } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -13,7 +13,7 @@ import { envelope, lock, prepare, paths, root, panesRoot, Store, type Envelope }
 import { listen, type Command } from './ipc.js';
 import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
-import { harnessSettings } from './settings.js';
+import { harnessSettings, modelThinkingLevel } from './settings.js';
 export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
 export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
@@ -117,7 +117,12 @@ export class Pane {
       }});
       const selected=(await p.conversation.agent(ctx)).model;
       if(!selected) throw Error('Saved conversation has no model');
-      if(!models.getModel(selected.provider,selected.modelId)) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
+      const selectedModel=models.getModel(selected.provider,selected.modelId);
+      if(!selectedModel) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
+      if((await p.harness.snapshot(AgentDoc,p.conversation.id,ctx))?.thinkingLevel===undefined) {
+        const thinkingLevel=modelThinkingLevel(selectedModel);
+        if(thinkingLevel!==undefined) await p.conversation.configure({thinkingLevel},ctx);
+      }
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       p.server = await listen(name, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
@@ -136,8 +141,10 @@ export class Pane {
       case 'model': {
         const errors=c.modelId===undefined?await refreshModels(this.models):[];
         if(c.modelId !== undefined) {
-          if(typeof c.provider !== 'string' || typeof c.modelId !== 'string' || !this.models.getModel(c.provider,c.modelId)) throw Error(`Model unavailable: ${c.provider}/${c.modelId}`);
-          await this.conversation.configure({model:{provider:c.provider,modelId:c.modelId}},ctx);
+          const target=typeof c.provider==='string' && typeof c.modelId==='string' ? this.models.getModel(c.provider,c.modelId) : undefined;
+          if(!target) throw Error(`Model unavailable: ${c.provider}/${c.modelId}`);
+          const thinkingLevel=modelThinkingLevel(target);
+          await this.conversation.configure({model:{provider:target.provider,modelId:target.id},...(thinkingLevel===undefined?{}:{thinkingLevel})},ctx);
         }
         const current=(await this.conversation.agent(ctx)).model;
         if(!current) throw Error('Pane has no configured model');

@@ -130,6 +130,40 @@ test('provider switching preserves running tools, queued input, memory and the s
     }finally{await reopened.close();}
   }finally{writeFileSync(release,'');await p.close();await other.close();}
 });
+test('native model thinking preferences apply on selection and preserve explicit saved choices',async()=>{
+  const settingsDir=join(directory,'.pi','agent'),settingsFile=join(settingsDir,'settings.json');
+  mkdirSync(settingsDir,{recursive:true});
+  const previous=existsSync(settingsFile)?readFileSync(settingsFile,'utf8'):undefined;
+  const selected={provider:'preferences',modelId:'owner/thinking'};
+  const other={provider:'preferences',modelId:'unconfigured'};
+  const provider=fauxProvider({provider:selected.provider,models:[{id:selected.modelId,reasoning:true},{id:other.modelId,reasoning:true}]});
+  const models=createModels();models.setProvider(provider.provider);
+  writeFileSync(settingsFile,JSON.stringify({modelThinkingLevels:{[`${selected.provider}/${selected.modelId}`]:'medium'}}));
+  let p:Awaited<ReturnType<typeof Pane.open>>|undefined;
+  try {
+    p=await Pane.open('thinking-preferences',models,selected);
+    const id=p.conversation.id;
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
+    await p.conversation.configure({thinkingLevel:'high'},ctx);
+    await p.close();p=undefined;
+    p=await Pane.open('thinking-preferences',models,other);
+    assert.equal(p.conversation.id,id);
+    assert.deepEqual((await p.conversation.agent(ctx)).model,selected);
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
+    await p.operation({op:'model',...other});
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
+    await p.operation({op:'model',...selected});
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
+    await p.conversation.configure({thinkingLevel:null},ctx);
+    await p.close();p=undefined;
+    p=await Pane.open('thinking-preferences',models,other);
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
+    assert.equal(provider.state.callCount,0);
+  }finally{
+    await p?.close();
+    if(previous===undefined)rmSync(settingsFile,{force:true});else writeFileSync(settingsFile,previous);
+  }
+});
 test('compaction profiles follow model switches and reload when a pane reopens',async()=>{
   const settingsDir=join(directory,'.pi','agent'),settingsFile=join(settingsDir,'settings.json');
   mkdirSync(settingsDir,{recursive:true});

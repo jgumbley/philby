@@ -70,6 +70,8 @@ For a work gateway or local server, add its provider to `.pi/agent/models.json` 
 
 Custom model IDs do not need to appear in Pi's bundled catalog. Use provider IDs such as `work` or `llama-local` consistently because saved panes retain their exact provider/model selection. Pi supplies built-in provider catalogs, caching, compatibility handling and supported discovery; a compatible endpoint's `/models` response does not necessarily include every piece of model metadata.
 
+Native `modelThinkingLevels` in `.pi/agent/settings.json` supplies per-model thinking defaults, keyed by exact `provider/model-id`. Philby applies the target model’s configured level when selecting it, and on opening a pane whose saved conversation has no explicit thinking level. Explicit saved levels survive reopening. Pi clamps the level to the model’s supported capabilities.
+
 Root `.env` selects the default for new panes with `DEFAULT_MODEL=provider/model-id`. The first slash separates the provider from the complete model ID. Reopening a saved pane keeps its selection even when the new-pane default has changed or is absent. An unavailable saved model is reported explicitly; Philby does not replace the conversation or silently choose another model. Model changes preserve conversation, memory and queued work.
 
 Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read. Configure the required providers through `make full-pi` and `.pi/agent/models.json` before reopening existing panes. Consultation helpers use the same runtime; they do not add synthetic model aliases.

@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SettingsManager } from '@earendil-works/pi-coding-agent';
-import { harnessSettings } from '../src/settings.js';
+import { harnessSettings, modelThinkingLevel } from '../src/settings.js';
+import { fauxProvider } from '@earendil-works/pi-ai';
 
 function fixture(t:TestContext) {
   const root=mkdtempSync(join(tmpdir(),'philby-settings-'));
@@ -57,5 +58,25 @@ test('invalid compaction settings fail instead of reverting to defaults',t=>{
   ].map(value=>JSON.stringify(value))]) {
     writeFileSync(file,source);
     assert.throws(()=>harnessSettings(SettingsManager.create(f.root,f.agent)),/settings|compaction|JSON|parse/i,source);
+  }
+});
+
+test('native per-model thinking preferences use native capability clamping',()=>{
+  const model=fauxProvider({provider:'local',models:[{id:'owner/model',reasoning:true}]}).provider.getModels()[0]!;
+  const settings=SettingsManager.inMemory({modelThinkingLevels:{'local/owner/model':'medium'}});
+  assert.equal(modelThinkingLevel(model,settings),'medium');
+  assert.equal(modelThinkingLevel({...model,reasoning:false},settings),'off');
+  assert.equal(modelThinkingLevel({...model,thinkingLevelMap:{medium:null}},settings),'high');
+  assert.equal(modelThinkingLevel(model,SettingsManager.inMemory({defaultThinkingLevel:'high'})),undefined);
+  assert.equal(modelThinkingLevel({...model,id:'other'},settings),undefined);
+});
+
+test('invalid native thinking preferences surface settings errors',t=>{
+  const f=fixture(t);
+  const file=join(f.agent,'settings.json');
+  const model=fauxProvider({provider:'local',models:[{id:'owner/model',reasoning:true}]}).provider.getModels()[0]!;
+  for(const source of ['{',JSON.stringify({modelThinkingLevels:[]}),JSON.stringify({modelThinkingLevels:{'local/owner/model':'invented'}})]) {
+    writeFileSync(file,source);
+    assert.throws(()=>modelThinkingLevel(model,SettingsManager.create(f.root,f.agent)),/settings|modelThinkingLevels|JSON|parse/i);
   }
 });

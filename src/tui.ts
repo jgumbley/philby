@@ -1,3 +1,4 @@
+import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { TuiMainScreen, ProcessTerminal, Input, SelectList, Editor, Markdown, Text, Container, Loader, matchesKey, type MarkdownTheme } from '@earendil-works/pi-tui';
 import { AgentDoc, LiveDoc } from '@earendil-works/pi-durable';
 import { ModelRuntime, ModelSelectorComponent, initTheme } from '@earendil-works/pi-coding-agent';
@@ -10,6 +11,14 @@ const accent=(s:string)=>`\x1b[36m${s}\x1b[39m`;
 const selectTheme={selectedPrefix:accent,selectedText:accent,description:dim,scrollInfo:dim,noMatch:dim};
 const theme:MarkdownTheme={heading:accent,link:accent,linkUrl:dim,code:accent,codeBlock:plain,codeBlockBorder:dim,quote:dim,quoteBorder:dim,hr:dim,listBullet:dim,bold:s=>`\x1b[1m${s}\x1b[22m`,italic:plain,strikethrough:plain,underline:plain};
 function textContent(content: any): string { return typeof content === 'string' ? content : (content || []).filter((c:any)=>c.type==='text').map((c:any)=>c.text).join(''); }
+export function assistantWarnings(message:Pick<AssistantMessage,'stopReason'|'content'|'errorMessage'>):string[] {
+  const warnings:string[]=[];
+  if(message.errorMessage) warnings.push(message.errorMessage);
+  if(message.stopReason==='length') warnings.push('Output token limit reached; response incomplete. Retry with smaller file changes or a larger output allowance.');
+  if(message.stopReason==='aborted') warnings.push('Generation cancelled; response may be incomplete.');
+  for(const part of message.content) if(part.type==='toolCall' && part.argumentsError) warnings.push(`${part.name} was not executed: invalid tool arguments. ${part.argumentsError.split('\n')[0]}`);
+  return warnings;
+}
 export function selectPane(open:(name:string,type?:string)=>Promise<void>,panes:{name:string;running:boolean}[],types:string[]):Promise<void> {
   if(!process.stdin.isTTY) throw Error('Pane selection requires a terminal');
   const tui=new TuiMainScreen(new ProcessTerminal());
@@ -76,7 +85,7 @@ export async function startTui(pane:Pane,quit:()=>Promise<void>) {
         history.addChild(new Text(dim(`${m.isError?'!':'›'} ${m.toolName} ${expanded ? output : output.split('\n').slice(0,2).join('\n').slice(0,220)}`),0,0));
       } else {
         const text=textContent(m.content);
-        if(m.role==='assistant' && m.errorMessage) history.addChild(new Text('! '+m.errorMessage,0,0));
+        if(m.role==='assistant') for(const warning of assistantWarnings(m)) history.addChild(new Text('! '+warning,0,0));
         if(text) history.addChild(new Markdown(m.role==='user'?`**you**  ${text}`:text,0,1,theme));
         if(m.role==='assistant') for(const c of m.content) if(c.type==='toolCall') history.addChild(new Text(dim(`› ${c.name} ${expanded ? JSON.stringify(c.arguments) : ''}`),0,0));
       }
