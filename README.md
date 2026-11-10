@@ -2,7 +2,7 @@
 
 Philby is a general-purpose working environment for persistent agents. Work is organised into frames, each with a continuing conversation, memory, instructions and tools. Return to a frame to inspect its work and change its direction. Its work survives closing and reopening it.
 
-The kernel provides continuity, communication and control. Frames build small reusable tools for their responsibilities and expose them through Make. You decide what the frames are for and steer their work.
+Philby provides continuity and control, with optional frame-to-frame communication. Frames build small reusable tools for their responsibilities and expose them through Make. You decide what the frames are for and steer their work.
 
 ## Start
 
@@ -85,7 +85,7 @@ Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read.
 | `.env.schema` | Instance settings, types and nonsecret defaults |
 | `.env` | Private instance values |
 | `shared/frame.env.schema` | Standard schema for saved frame settings |
-| `frames/<slug>/frame.env` | This frame's saved model and optional thinking preference |
+| `frames/<slug>/frame.env` | This frame's saved model, thinking preference and messaging toggle |
 | `frames/<slug>/.env.schema` | Additional schema for this frame's tools |
 | `frames/<slug>/.env` | Private values for this frame's tools |
 
@@ -94,9 +94,23 @@ A saved settings file looks like:
 ```dotenv
 FRAME_MODEL="openai/gpt-6.1-sol"
 FRAME_THINKING_LEVEL=high
+FRAME_MESSAGING=true
 ```
 
 `FRAME_MODEL` is required. `FRAME_THINKING_LEVEL` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; leaving it blank uses Pi's model thinking preference. Pi applies the model's capability limits. These settings are literal values, validated by the common schema. Unknown keys, duplicate keys and malformed values fail. Environment variables and private tool files cannot override saved frame settings.
+
+`FRAME_MESSAGING` accepts exactly `true` or `false` and defaults to `true` when omitted. It controls both frame messages and passive reports. When false, Philby rejects new messages and reports to or from that frame, including delivery to a closed frame. `/send`, `/report` and `/updates` are unavailable; unread reports do not enter model context or appear in the header. Ordinary user input, memory, model selection and transcript history continue to work.
+
+Change messaging while the frame is closed, then reopen it:
+
+```sh
+make frame-messaging slug=research
+make frame-close slug=research
+make frame-messaging slug=research ENABLED=false
+make frame slug=research
+```
+
+The first command reports the saved setting and, when running supported code, the active setting. The setter takes the frame's lifetime lock and preserves its other settings. It refuses to change a running frame. Set `ENABLED=true` while closed to re-enable messaging. Existing mailbox records and reports are retained. Requests already being accepted when the setting changes may finish acceptance. Undelivered mailbox items wait until messaging is re-enabled; inputs already submitted to Durable retain their normal recovery behavior. A fresh-session reset still refuses pending mailbox work. Disabling messaging does not erase messages already present in conversation history, and it does not restrict native shell or filesystem access.
 
 `/model` updates `frame.env` atomically before applying the choice to the existing conversation. To save a thinking preference on a running frame, use `make frame-thinking slug=research LEVEL=high`; `LEVEL=default` clears that preference. Edit `frame.env` directly only while the frame is closed, then reopen it. Durable retains the active projection of these settings alongside its conversation state. The file is authoritative when reopening; conversation history, memory, plans, mailbox records and queued work remain in their existing stores.
 
@@ -115,7 +129,7 @@ SERVICE_URL=
 SERVICE_TOKEN=
 ```
 
-Put the values in that frame's ignored `.env`. `PHILBY_*`, `PI_CODING_AGENT_DIR`, `FRAME_MODEL` and `FRAME_THINKING_LEVEL` are reserved in frame tool configuration. Philby controls frame identity, storage paths and the Pi directory. Schemas contain Varlock decorators; credential values belong in private files or Pi's credential store. Root and recipe schemas are tracked; `.env` files remain ignored. Pi continues to own provider definitions, login, token refresh, model catalogs and compaction.
+Put the values in that frame's ignored `.env`. `PHILBY_*`, `PI_CODING_AGENT_DIR`, `FRAME_MODEL`, `FRAME_THINKING_LEVEL` and `FRAME_MESSAGING` are reserved in frame tool configuration. Philby controls frame identity, storage paths and the Pi directory. Schemas contain Varlock decorators; credential values belong in private files or Pi's credential store. Root and recipe schemas are tracked; `.env` files remain ignored. Pi continues to own provider definitions, login, token refresh, model catalogs and compaction.
 
 ```sh
 make config-check
@@ -225,7 +239,7 @@ make frame-capture slug=research
 
 Prompt precedence is `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin. Files and stdin preserve multiline content and shell metacharacters. Relative paths use the command's working directory; use absolute paths with `make -C`. Failures return nonzero. Capture returns the active transcript as JSON, even for a closed frame; treat that output as private.
 
-Messages and reports require `slug` to identify the receiving frame. `from` identifies the sender; inside a frame it can be inferred from `PHILBY_FRAME`, while commands run outside a frame must supply it. Acceptance means the receiving mailbox transaction has committed, including when that frame is closed. It does not mean the work is complete. Reuse the same stable `REQUEST_ID` for retries. Conflicting content for an ID is rejected within the receiving frame; there is no global ID registry. Reports remain passive.
+Messages and reports require messaging enabled at both endpoints and `slug` to identify the receiving frame. `from` identifies the sender; inside a frame it can be inferred from `PHILBY_FRAME`, while commands run outside a frame must supply it. Acceptance means the receiving mailbox transaction has committed, including when that frame is closed. It does not mean the work is complete. Reuse the same stable `REQUEST_ID` for retries. Conflicting content for an ID is rejected within the receiving frame; there is no global ID registry. Reports remain passive.
 
 ## Modules
 

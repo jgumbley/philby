@@ -65,7 +65,7 @@ test('frame schemas validate inherited requirements and their own stronger overr
 
 test('frame environment rejects reserved identities and managed settings',t=>{
   const f=fixture(t);
-  for(const key of ['PHILBY_ROOT','PHILBY_FRAMES_DIR','PHILBY_FRAME','PI_CODING_AGENT_DIR','FRAME_MODEL','FRAME_THINKING_LEVEL']) {
+  for(const key of ['PHILBY_ROOT','PHILBY_FRAMES_DIR','PHILBY_FRAME','PI_CODING_AGENT_DIR','FRAME_MODEL','FRAME_THINKING_LEVEL','FRAME_MESSAGING']) {
     writeFileSync(join(f.one,'.env'),`${key}=forbidden\n`);
     const output=execute(frame(f.one,'one',f.frames),f.env);
     assert.notEqual(output.status,0,key);

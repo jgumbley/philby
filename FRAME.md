@@ -40,6 +40,10 @@ require explicit direction.
 
 ## Communication and memory
 
+Frame messages and passive reports require messaging enabled for both frames.
+If your frame context says messaging is disabled, do not send messages or
+reports or inspect updates. Memory remains available.
+
 Use `make -C "$PHILBY_ROOT" frame-send slug=receiving-frame from="$PHILBY_FRAME"
 REQUEST_ID=stable-id PROMPT_FILE=/absolute/path/to/message` to send work. The slug
 identifies the receiving frame. Reuse the request ID when retrying the same

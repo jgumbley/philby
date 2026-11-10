@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { root } from './config.js';
+import { readFrameSettings } from './frame-config.js';
 
 export { root };
 if(process.env.PHILBY_HOME) throw Error('PHILBY_HOME is no longer supported; use PHILBY_FRAMES_DIR for complete frame directories');
@@ -75,6 +76,9 @@ export function lock(name: string) {
   return () => db.close();
 }
 export type Envelope = { id: string; from: string; to: string; content: string; kind: 'input' | 'update'; mode: 'steer' | 'followUp' };
+export function messagingEnabled(name:string) {
+  return readFrameSettings(paths(name).tools)?.messaging ?? true;
+}
 export class Store {
   db: DatabaseSync;
   constructor(readonly name: string) {
@@ -91,6 +95,7 @@ export class Store {
     if (e.to !== this.name) throw Error('Wrong receiving frame');
     if (!e.id || !e.content.trim()) throw Error('Request ID and nonempty content required');
     if(!['input','update'].includes(e.kind) || !['steer','followUp'].includes(e.mode)) throw Error('Invalid message kind or mode');
+    for(const name of new Set([e.from,e.to])) if(!messagingEnabled(name)) throw Error(`Messaging is disabled for frame ${name}`);
     const body = JSON.stringify(e);
     this.db.exec('BEGIN IMMEDIATE');
     try {

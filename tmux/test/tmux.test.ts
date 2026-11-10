@@ -338,6 +338,35 @@ test('native model shortlist toggles all models, cancels locally and preserves s
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
 
+test('disabled messaging hides terminal commands and unread reports while ordinary input remains available',async()=>{
+  const screen=()=>tmux('capture-pane','-p','-t','philby:quiet');
+  const command=(text:string)=>tmux('send-keys','-t','philby:quiet','C-u',text,'Enter');
+  try {
+    await make('frame','slug=quiet');
+    await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
+    assert.match(await screen(),/\/updates/);
+    await make('frame-report','slug=quiet','from=quiet','REQUEST_ID=retained-report','prompt=Retain this report');
+    await until(async()=> (await screen()).includes('1 unread updates'));
+    await make('frame-close','slug=quiet');
+    await make('frame-messaging','slug=quiet','ENABLED=false');
+    await make('frame','slug=quiet');
+    await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
+    assert.doesNotMatch(await screen(),/unread updates|\/updates/);
+    for(const text of ['/updates','/send quiet blocked input','/report quiet blocked report']) {
+      await command('/help');
+      await until(async()=> (await screen()).includes('inspect or edit saved memory'));
+      assert.doesNotMatch(await screen(),/\/updates|\/send|\/report/);
+      await command(text);
+      await until(async()=> (await screen()).includes('Messaging is disabled for frame quiet'));
+    }
+    await command('ordinary input still works');
+    await until(async()=> (await make('frame-capture','slug=quiet')).includes('Received: ordinary input still works'));
+    assert.doesNotMatch(await make('frame-capture','slug=quiet'),/blocked input|blocked report/);
+    await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
+    assert.doesNotMatch(await screen(),/unread updates|\/updates/);
+  } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
+});
+
 test('plan controls preserve literal text and update the terminal from both command interfaces',async()=>{
   const screen=()=>tmux('capture-pane','-p','-t','philby:planner');
   const status=async()=>JSON.parse(await make('frame-plan','slug=planner'));

@@ -34,6 +34,7 @@ GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login go
 .PHONY: help ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
 help:
 	@echo 'config-check; frame-config-check slug=<slug>; frame-config-migrate slug=<slug> — validate or migrate configuration through the root Makefile'
+	@echo 'frame-messaging slug=<slug> [ENABLED=true|false] — inspect messaging or change it for a closed frame'
 	@echo 'provider-models [PROVIDER=name] — list available chat models from Pi'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
 	@echo 'ask reason twitter — fresh independent consultations, no local tools or frame context'
@@ -93,6 +94,6 @@ wiki-test:
 full-pi provider-models:
 	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build
 	@node --disable-warning=ExperimentalWarning "$(ROOT)/shared/$@.mjs"
-.PHONY: config-check frame-config-check frame-config-migrate
-config-check frame-config-check frame-config-migrate:
+.PHONY: config-check frame-config-check frame-config-migrate frame-messaging
+config-check frame-config-check frame-config-migrate frame-messaging:
 	@$(MAKE) --no-print-directory -C "$(ROOT)" $@

@@ -77,6 +77,8 @@ export class Frame {
   onError: (error: unknown) => void = e => console.error(String(e));
   private closure?: Promise<void>;
   private boot = false;
+  private messagingEnabled = true;
+  get messaging() {return this.messagingEnabled;}
   private shellEnv!:NodeJS.ProcessEnv;
   private settingsUpdate:Promise<unknown>=Promise.resolve();
   private readonly makefiles: Record<string,string>;
@@ -93,6 +95,7 @@ export class Frame {
       const dirs = prepare(name);
       p.shellEnv=environment ?? frameEnvironment(dirs.tools,name,framesRoot);
       let savedSettings=readFrameSettings(dirs.tools);
+      p.messagingEnabled=savedSettings?.messaging ?? true;
       const guidance=readFileSync(join(root,'FRAME.md'),'utf8');
       const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8');
       const settings=harnessSettings();
@@ -102,7 +105,7 @@ export class Frame {
       p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:p.shellEnv});
       const registry = createRegistry(); registry.install(CodingTools);
       registry.install(defineExtension({name:'philby', tasks:[Startup], sections:[
-        section('frame', () => `Your frame is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.`),
+        section('frame', () => `Your frame is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.${p.messaging ? '' : ' Messaging is disabled for this frame. Do not send or receive frame messages or reports, or inspect updates.'}`),
         section('frame-guidance', () => guidance || undefined),
         section('frame-scope', () => scope || undefined),
         ...Object.entries(p.makefiles).map(([name,file])=>section(`${name}-tools`,()=>{
@@ -111,7 +114,7 @@ export class Frame {
           catch(error) {p.onError(error);source=`ERROR reading Makefile: ${String(error)}`;}
           return `Source: ${file}\n\n${source}`;
         })),
-        section('unread-updates', () => JSON.stringify(p.store.updates().filter(u=>!u.seen).slice(-50))),
+        ...(p.messaging ? [section('unread-updates', () => JSON.stringify(p.store.updates().filter(u=>!u.seen).slice(-50)))] : []),
         section('saved-memory', async (input, context) => JSON.stringify(await input.read.snapshot(Memory, input.conversationId, context))),
         section('plan-mode', async (input, context) => (await input.read.snapshot(PlanMode, input.conversationId, context))?.active ? PLAN_MODE_PROMPT : undefined),
         section('approved-plan', async (input, context) => { const doc = await input.read.snapshot(PlanMode, input.conversationId, context); return doc && !doc.active && doc.plan ? `Approved plan:\n${doc.plan}` : undefined; })
@@ -128,7 +131,7 @@ export class Frame {
       const selectedModel=models.getModel(selected.provider,selected.modelId);
       if(!selectedModel) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
       if(!savedSettings) {
-        savedSettings={model:selected,...(stored?.thinkingLevel===undefined?{}:{thinkingLevel:stored.thinkingLevel})};
+        savedSettings={model:selected,messaging:true,...(stored?.thinkingLevel===undefined?{}:{thinkingLevel:stored.thinkingLevel})};
         writeFrameSettings(dirs.tools,savedSettings);
       }
       const thinkingLevel=savedSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
@@ -140,7 +143,7 @@ export class Frame {
       await p.tick();
       if(boot && !startup) await p.conversation.commit(tx=>tx.createTask(Startup,{prompt:boot},{ownership:{kind:'conversation'},background:true}),ctx);
       p.harness.resume();
-      p.timer = setInterval(() => { void p.tick().catch(p.onError); },500);
+      if(p.messaging) p.timer = setInterval(() => { void p.tick().catch(p.onError); },500);
       return p;
     } catch(e) { await p.close(); throw e; }
   }
@@ -168,15 +171,16 @@ export class Frame {
   }
   async operation(c: Command): Promise<unknown> {
     if (this.closing) throw Error('Frame is closing');
+    if(!this.messaging && ['send','receive','updates'].includes(c.op)) throw Error(`Messaging is disabled for frame ${this.name}`);
     switch(c.op) {
-      case 'status': return {slug:this.name,pid:process.pid, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.store.updates(), work:await this.harness.inspect(ctx)};
+      case 'status': return {slug:this.name,pid:process.pid,messaging:this.messaging, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.messaging ? this.store.updates() : [], work:await this.harness.inspect(ctx)};
       case 'model': {
         const errors=c.modelId===undefined?await refreshModels(this.models):[];
         if(c.modelId !== undefined) {
           const target=typeof c.provider==='string' && typeof c.modelId==='string' ? this.models.getModel(c.provider,c.modelId) : undefined;
           if(!target) throw Error(`Model unavailable: ${c.provider}/${c.modelId}`);
           const thinkingLevel=modelThinkingLevel(target);
-          await this.updateSettings(current=>({model:{provider:target.provider,modelId:target.id},...((thinkingLevel ?? current.thinkingLevel)===undefined?{}:{thinkingLevel:thinkingLevel ?? current.thinkingLevel})}));
+          await this.updateSettings(current=>({...current,model:{provider:target.provider,modelId:target.id},thinkingLevel:thinkingLevel ?? current.thinkingLevel}));
         }
         const current=(await this.conversation.agent(ctx)).model;
         if(!current) throw Error('Frame has no configured model');
@@ -186,7 +190,7 @@ export class Frame {
       }
       case 'thinking': {
         if(c.level!==null && typeof c.level!=='string') throw Error('Supply a thinking level or null to use the Pi preference');
-        await this.updateSettings(current=>({model:current.model,...(c.level===null?{}:{thinkingLevel:c.level as FrameSettings['thinkingLevel']})}));
+        await this.updateSettings(current=>({...current,thinkingLevel:c.level===null?undefined:c.level as FrameSettings['thinkingLevel']}));
         return {saved:true};
       }
       case 'input': {
@@ -241,7 +245,7 @@ export class Frame {
           const inbox = await tx.doc(InboxDoc, this.conversation.id);
           if(inbox.items.length > 0) throw Error('Cannot start a new session while work is queued. Wait for queued work to complete or stop it with /stop.');
           const pending = this.store.pending().filter(e => e.kind === 'input');
-          if(pending.length > 0) throw Error('Cannot start a new session while messages are pending delivery. Wait for delivery or stop the frame.');
+          if(pending.length > 0) throw Error(`Cannot start a new session while messages are pending delivery. ${this.messaging ? 'Wait for delivery or stop the frame.' : 'Enable messaging and reopen the frame to deliver them.'}`);
           const plan = await tx.doc(PlanMode, this.conversation.id);
           plan.active = false;
           plan.plan = '';
@@ -256,7 +260,7 @@ export class Frame {
     }
   }
   tick() {
-    if (this.closing) return Promise.resolve();
+    if (this.closing || !this.messaging) return Promise.resolve();
     if(this.ticking) return this.ticking;
     this.ticking = this.pump().finally(() => {this.ticking=undefined;});
     return this.ticking;
@@ -310,7 +314,7 @@ export async function migrateFrameSettings(name:string) {
       if(!conversation) throw Error(`Frame ${name} has no saved conversation`);
       const saved=await harness.snapshot(AgentDoc,conversation.id,ctx);
       if(!saved?.model) throw Error(`Frame ${name} has no saved model`);
-      writeFrameSettings(directory,{model:saved.model,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
+      writeFrameSettings(directory,{model:saved.model,messaging:true,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
       return {slug:name,migrated:true};
     } finally {await harness.close(ctx);}
   } finally {release();}

@@ -8,7 +8,7 @@ import { modelReference, type ModelReference } from './providers.js';
 import { loadEnvironment } from './varlock.js';
 
 export type ThinkingLevel = ModelThinkingLevel;
-export type FrameSettings = {model:ModelReference;thinkingLevel?:ThinkingLevel};
+export type FrameSettings = {model:ModelReference;thinkingLevel?:ThinkingLevel;messaging:boolean};
 export class FrameSettingsWriteError extends Error {
   readonly published=true;
   constructor(cause:unknown) {
@@ -16,7 +16,7 @@ export class FrameSettingsWriteError extends Error {
     this.name='FrameSettingsWriteError';
   }
 }
-const keys=['FRAME_MODEL','FRAME_THINKING_LEVEL'];
+const keys=['FRAME_MODEL','FRAME_THINKING_LEVEL','FRAME_MESSAGING'];
 
 function parseSettings(source:string):FrameSettings {
   const seen=new Set<string>();
@@ -31,7 +31,7 @@ function parseSettings(source:string):FrameSettings {
   const values=loadEnvironment([join(root,'shared','frame.env.schema')],parseEnv(source));
   const model=modelReference(values.FRAME_MODEL);
   const thinkingLevel=values.FRAME_THINKING_LEVEL as ThinkingLevel | undefined;
-  return {model,...(thinkingLevel?{thinkingLevel}:{})};
+  return {model,...(thinkingLevel?{thinkingLevel}:{}),messaging:values.FRAME_MESSAGING==='true'};
 }
 
 export function readFrameSettings(directory:string):FrameSettings|undefined {
@@ -43,9 +43,9 @@ export function readFrameSettings(directory:string):FrameSettings|undefined {
 
 export function writeFrameSettings(directory:string,settings:FrameSettings):void {
   const reference=`${settings.model.provider}/${settings.model.modelId}`;
-  const source=`FRAME_MODEL="${reference}"\nFRAME_THINKING_LEVEL=${settings.thinkingLevel ?? ''}\n`;
+  const source=`FRAME_MODEL="${reference}"\nFRAME_THINKING_LEVEL=${settings.thinkingLevel ?? ''}\nFRAME_MESSAGING=${settings.messaging}\n`;
   const validated=parseSettings(source);
-  if(validated.model.provider!==settings.model.provider || validated.model.modelId!==settings.model.modelId || validated.thinkingLevel!==settings.thinkingLevel) throw Error('Frame settings cannot be represented in frame.env');
+  if(validated.model.provider!==settings.model.provider || validated.model.modelId!==settings.model.modelId || validated.thinkingLevel!==settings.thinkingLevel || validated.messaging!==settings.messaging) throw Error('Frame settings cannot be represented in frame.env');
   const temporary=join(directory,`.frame.env-${randomUUID()}.tmp`);
   let published=false;
   try {

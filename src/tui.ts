@@ -104,11 +104,11 @@ export async function startTui(frame:Frame,quit:()=>Promise<void>) {
     const partial=textContent(live?.generation?.message?.content);
     if(partial) history.addChild(new Markdown(partial,0,1,theme));
     for(const tool of live?.tools || []) if(tool.status!=='done') history.addChild(new Text(dim(`› ${tool.name} ${tool.status}${expanded && tool.output ? '\n'+tool.output : ''}`),0,0));
-    const unread=frame.store.updates().filter(u=>!u.seen).length;
+    const unread=frame.messaging ? frame.store.updates().filter(u=>!u.seen).length : 0;
     const model=agentState?.value.model;
     const planActive=planState?.value?.active||false;
     header.setText(accent(frame.name)+dim(`  ${model?.modelId || ''}  ${live?.run?'working':'ready'}${planActive?'  PLAN MODE':''}  ${unread?`${unread} unread updates`:''}`));
-    info.setText(confirmQuit ? 'Quit all Philby frames? [y/n]' : panel || dim('/help · /model · /memory · /plan · /tools · /updates · /quit · Esc stop · Ctrl-O tool output'));
+    info.setText(confirmQuit ? 'Quit all Philby frames? [y/n]' : panel || dim(`/help · /model · /memory · /plan · /tools${frame.messaging?' · /updates':''} · /quit · Esc stop · Ctrl-O tool output`));
     tui.requestRender();
   };
   state.start(async call=>{
@@ -158,7 +158,7 @@ export async function startTui(frame:Frame,quit:()=>Promise<void>) {
       if(command==='/close') {await frame.close();return;}
       if(command==='/model') {await chooseModel();return;}
       if(command==='/stop') await frame.operation({op:'stop'});
-      else if(command==='/help') panel='/model — choose a model for this frame\n/memory [field] — inspect or edit saved memory\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — start a fresh session, preserving files, tools, memory and archived history\n/tools · /updates · /send slug message · /report slug message\n/steer message · /stop · /close · /quit — quit all frames after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.';
+      else if(command==='/help') panel=`/model — choose a model for this frame\n/memory [field] — inspect or edit saved memory\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — start a fresh session, preserving files, tools, memory and archived history\n/tools${frame.messaging?' · /updates · /send slug message · /report slug message':''}\n/steer message · /stop · /close · /quit — quit all frames after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.`;
       else if(command==='/memory') {
         const memory=await frame.operation({op:'memory'}) as Record<string,string>;
         if(rest && rest in memory) {editor.setText(`/save ${rest}\n${memory[rest]}`);panel=`Editing ${rest}. Enter saves; Shift-Enter adds lines.`;render();return;}

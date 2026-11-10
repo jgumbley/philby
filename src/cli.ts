@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { root, framesRoot, slug, Store, envelope, locked, lock, configured, frameTypes, paths, prepare } from './store.js';
 import { applyEnvironment, frameEnvironment } from './config.js';
-import { readFrameSettings } from './frame-config.js';
+import { readFrameSettings, writeFrameSettings } from './frame-config.js';
 import { request, running } from './ipc.js';
 import { migrateFrames } from './migration.js';
 import { models } from './models.js';
@@ -100,6 +100,25 @@ async function main() {
   const selected=destination || process.env.PHILBY_FRAME;
   if(!selected) throw Error(`Supply slug=<frame> for ${command}, or run from a frame`);
   const name=slug(selected);
+  if(command==='messaging') {
+    const directory=paths(name).tools;
+    const settings=readFrameSettings(directory);
+    if(!settings) throw Error('Missing frame.env; open the frame or run make frame-config-migrate first');
+    if(process.env.ENABLED===undefined) {
+      const active=await running(name);
+      console.log(JSON.stringify({slug:name,enabled:settings.messaging,running:!!active,active:active?.messaging ?? null}));return;
+    }
+    if(process.env.ENABLED!=='true' && process.env.ENABLED!=='false') throw Error('Supply ENABLED=true or ENABLED=false');
+    const release=lock(name);
+    try {
+      const current=readFrameSettings(directory);
+      if(!current) throw Error('Missing frame.env');
+      const enabled=process.env.ENABLED==='true';
+      writeFrameSettings(directory,{...current,messaging:enabled});
+      console.log(JSON.stringify({slug:name,enabled}));
+    } finally {release();}
+    return;
+  }
   if(command==='config-migrate') {console.log(JSON.stringify(await migrateFrameSettings(name)));return;}
   if(command==='frame-config-check') {
     frameEnvironment(paths(name).tools,name,framesRoot);
