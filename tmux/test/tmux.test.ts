@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 const directory=mkdtempSync(join(tmpdir(),'philby-tmux-'));
@@ -28,6 +28,47 @@ test('terminal wrapper preserves literal arguments, supplies a TTY and propagate
   const output=await run(...terminalCommand([process.execPath,'-e',"if(!process.stdin.isTTY) process.exit(2); process.stdout.write(process.argv[1])",literal]));
   assert.ok(output.endsWith(literal),JSON.stringify(output));
   await assert.rejects(run(...terminalCommand([process.execPath,'-e','process.exit(17)'])),/: 17\n/);
+});
+test('frame launches replace stale tmux environments and keep invocation values out of commands',async()=>{
+  const first="first 'value' $HOME `literal` $(literal)",second='second invocation';
+  const frameEnv=(value?:string):NodeJS.ProcessEnv=>({...env,PHILBY_LAUNCH_VALUE:value});
+  const open=(name:string,value?:string)=>run('make',['--no-print-directory','frame',`slug=${name}`],undefined,frameEnv(value));
+  const tools=(name:string)=>join(env.PHILBY_FRAMES_DIR,name);
+  for(const name of ['one','two','three']) {
+    mkdirSync(tools(name),{recursive:true});
+    writeFileSync(join(tools(name),'SCOPE.md'),'');
+    writeFileSync(join(tools(name),'.env.schema'),'# @defaultRequired=false\n\n# @type=string\nLAUNCH_CONFIG=\n');
+    writeFileSync(join(tools(name),'.env'),`LAUNCH_CONFIG=${name}\n`);
+    writeFileSync(join(tools(name),'BOOT.md'),'Check the launch fixture.');
+    writeFileSync(join(tools(name),'Makefile'),'close:\n\t@node probe.mjs\n');
+    writeFileSync(join(tools(name),'probe.mjs'),"import {writeFileSync} from 'node:fs';\nwriteFileSync('environment.json',JSON.stringify({value:process.env.PHILBY_LAUNCH_VALUE,config:process.env.LAUNCH_CONFIG,pane:process.env.TMUX_PANE,root:process.env.PHILBY_ROOT,frames:process.env.PHILBY_FRAMES_DIR}));\n");
+  }
+  let snapshots:string|undefined;
+  try {
+    await open('one',first);
+    await tmux('set-environment','-g','PHILBY_LAUNCH_VALUE','stale-server-value');
+    await tmux('set-environment','-g','LAUNCH_CONFIG','stale-config-value');
+    await open('two',second);
+    await open('three');
+    const command=await tmux('show-options','-gv','@philby_new_window');
+    const launchFile=command.match(/'([^']+\.json)'/)?.[1];
+    assert.ok(launchFile,command);
+    snapshots=resolve(launchFile,'..');
+    assert.equal(statSync(snapshots).mode&0o777,0o700);
+    assert.equal(statSync(launchFile).mode&0o777,0o600);
+    const commands=command+await tmux('list-panes','-a','-F','#{pane_start_command}');
+    assert.equal(commands.includes(first),false);
+    assert.equal(commands.includes(second),false);
+    assert.doesNotMatch(commands,/PHILBY_LAUNCH_VALUE|stale-server-value|stale-config-value/);
+    for(const [name,value] of [['one',first],['two',second],['three',undefined]] as const) {
+      const pane=(await tmux('display-message','-p','-t',`philby:${name}`,'#{pane_id}')).trim();
+      await make('frame-close',`slug=${name}`);
+      await until(async()=>existsSync(join(tools(name),'environment.json')));
+      assert.deepEqual(JSON.parse(readFileSync(join(tools(name),'environment.json'),'utf8')),{...(value===undefined?{}:{value}),config:name,pane,root,frames:env.PHILBY_FRAMES_DIR});
+    }
+    await make('cleanup');
+    assert.equal(existsSync(snapshots),false);
+  } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
 test('bare Make starts one selector without creating a frame and creates the first named frame on request',async()=>{
   const frameNames=()=>existsSync(env.PHILBY_FRAMES_DIR)?readdirSync(env.PHILBY_FRAMES_DIR):[];
@@ -246,7 +287,7 @@ test('native model shortlist toggles all models, cancels locally and preserves s
   const project=join(directory,'picker-root');
   const agent=join(project,'.pi','agent');
   mkdirSync(agent,{recursive:true});
-  for(const name of ['FRAME.md','frame-types','shared','tmux']) symlinkSync(join(root,name),join(project,name));
+  for(const name of ['.env.schema','FRAME.md','frame-types','shared','tmux']) symlinkSync(join(root,name),join(project,name));
   writeFileSync(join(agent,'settings.json'),JSON.stringify({enabledModels:['test/test']}));
   const environment={...env,PHILBY_ROOT:project};
   const make=(...args:string[])=>run('make',['--no-print-directory',...args],undefined,environment);

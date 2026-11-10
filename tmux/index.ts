@@ -1,12 +1,12 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import { root, framesRoot, runtimeDir, prepare } from '../src/store.js';
-import { piAgentDir } from '../src/config.js';
+import { invocationEnvironment, piAgentDir } from '../src/config.js';
 import { running } from '../src/ipc.js';
 import { installKittyNavigation } from './kitty.js';
 import { withTmuxPassthrough } from './kitty-route.js';
@@ -15,8 +15,10 @@ export { root, framesRoot, runtimeDir };
 type BrowserName = 'chrome' | 'firefox';
 type BrowserView = {name:BrowserName;pane:string;pid:number;dead:boolean};
 
-const cli=fileURLToPath(new URL('../src/cli.js',import.meta.url));
+const launcher=fileURLToPath(new URL('../src/launch.js',import.meta.url));
 const server=()=>process.env.PHILBY_TMUX_SOCKET || `philby-${createHash('sha256').update(framesRoot).digest('hex').slice(0,12)}`;
+const launchDirectory=()=>join(runtimeDir,`launch-${createHash('sha256').update(server()).digest('hex').slice(0,16)}`);
+let environmentFile:string|undefined;
 function tmux(args:string[], allowFailure=false) {
   const result=spawnSync('tmux',['-L',server(),'-f',join(root,'tmux','philby.conf'),...args],{encoding:'utf8'});
   if(result.error) throw result.error;
@@ -30,9 +32,14 @@ function paneList(format:string) {
 }
 const quote=(s:string)=>`'${s.replaceAll("'", "'\\''")}'`;
 function launch(action:string,name?:string) {
-  const keys=['PHILBY_TEST_PROVIDER'];
-  const env=['PHILBY_ROOT='+root,'PHILBY_FRAMES_DIR='+framesRoot,'PHILBY_TMUX_SOCKET='+server(),'PI_CODING_AGENT_DIR='+piAgentDir,...keys.filter(k=>process.env[k]).map(k=>`${k}=${process.env[k]}`)];
-  return ['env','-u','slug',...env,process.execPath,'--disable-warning=ExperimentalWarning',cli,action,...(name?[name]:[])].map(quote).join(' ');
+  if(!environmentFile) {
+    const env:NodeJS.ProcessEnv={...invocationEnvironment,PHILBY_ROOT:root,PHILBY_FRAMES_DIR:framesRoot,PHILBY_TMUX_SOCKET:server(),PI_CODING_AGENT_DIR:piAgentDir};
+    for(const key of ['slug','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL','PHILBY_FRAME']) delete env[key];
+    mkdirSync(launchDirectory(),{recursive:true,mode:0o700});
+    environmentFile=join(launchDirectory(),`${randomUUID()}.json`);
+    writeFileSync(environmentFile,JSON.stringify(env),{flag:'wx',mode:0o600});
+  }
+  return [process.execPath,'--disable-warning=ExperimentalWarning',launcher,environmentFile,action,...(name?[name]:[])].map(quote).join(' ');
 }
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 function openingLock() {
@@ -197,4 +204,6 @@ export async function closeBrowsers() {
 }
 export function stopServer() {
   tmux(['kill-server'],true);
+  rmSync(launchDirectory(),{recursive:true,force:true});
+  environmentFile=undefined;
 }

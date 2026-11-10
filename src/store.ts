@@ -61,6 +61,10 @@ export function prepare(name: string, type?: string) {
       } else renameSync(staging,p.tools);
     } finally {rmSync(staging,{recursive:true,force:true});}
   }
+  if(!existsSync(join(p.tools,'frame.env'))) {
+    try {writeFileSync(join(p.tools,'.env.schema'),'# @defaultRequired=true\n# @defaultSensitive=true\n',{flag:'wx'});}
+    catch(error) {if((error as NodeJS.ErrnoException).code!=='EEXIST') throw error;}
+  }
   mkdirSync(p.state, { recursive: true, mode: 0o700 });
   mkdirSync(p.socketDir, { recursive: true, mode: 0o700 });
   return p;

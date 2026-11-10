@@ -1,7 +1,9 @@
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
@@ -11,10 +13,13 @@ import { createRegistry, Harness, InboxDoc, ROOT_CONVERSATION_ID } from '@earend
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 const directory=mkdtempSync(join(tmpdir(),'philby-test-'));
 process.env.PHILBY_ROOT=directory;process.env.PHILBY_FRAMES_DIR=join(directory,'frames');
+cpSync(new URL('../../.env.schema',import.meta.url),join(directory,'.env.schema'));
 writeFileSync(join(directory,'FRAME.md'),'shared-frame-guidance');
 cpSync(new URL('../../frame-types',import.meta.url),join(directory,'frame-types'),{recursive:true});
 mkdirSync(join(directory,'shared'));writeFileSync(join(directory,'shared','Makefile'),'help:\n\t@echo shared-tool\n');
-const {Frame,Memory,ctx}=await import('../src/frame.js');
+cpSync(new URL('../../shared/frame.env.schema',import.meta.url),join(directory,'shared','frame.env.schema'));
+const {Frame,Memory,ctx,migrateFrameSettings}=await import('../src/frame.js');
+const {readFrameSettings}=await import('../src/frame-config.js');
 const {envelope,Store,paths,prepare}=await import('../src/store.js');
 const {request}=await import('../src/ipc.js');
 const model={provider:'test',modelId:'test'};
@@ -75,6 +80,176 @@ test('an unavailable new-frame default leaves no saved root conversation',async(
   try {assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);}
   finally{await reopened.close();}
 });
+test('edited frame settings control reopening without replacing saved history or memory',async()=>{
+  const alternate={provider:'test',modelId:'owner/alternate'};
+  const provider=fauxProvider({provider:'test',models:[{id:model.modelId},{id:alternate.modelId,reasoning:true}],tokensPerSecond:10000});
+  provider.setResponses([fauxAssistantMessage('saved answer')]);
+  const models=createModels();models.setProvider(provider.provider);
+  const p=await Frame.open('settings-authority',models,model);
+  const id=p.conversation.id;
+  await p.operation({op:'memory',field:'notes',content:'retained settings memory'});
+  assert.equal((await (await p.conversation.submit({type:'input',content:'retained history'},ctx)).wait(ctx)).status,'done');
+  const history=await p.operation({op:'capture'});
+  await p.close();
+  const file=join(paths(p.name).tools,'frame.env');
+  const source='FRAME_MODEL=test/owner/alternate\nFRAME_THINKING_LEVEL=high\n';
+  writeFileSync(file,source);
+  const reopened=await Frame.open(p.name,models,()=>{throw Error('new-frame default must not be evaluated');});
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual((await reopened.conversation.agent(ctx)).model,alternate);
+    assert.equal((await reopened.conversation.agent(ctx)).thinkingLevel,'high');
+    assert.deepEqual(await reopened.operation({op:'capture'}),history);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'retained settings memory');
+    assert.equal(readFileSync(file,'utf8'),source);
+    assert.equal(provider.state.callCount,1);
+  } finally {await reopened.close();}
+});
+test('old saved frames seed schema settings from their exact saved agent without changing work',async()=>{
+  const f=fixture();
+  const p=await Frame.open('settings-migration',f.models,model);
+  const id=p.conversation.id;
+  await p.operation({op:'thinking',level:'high'});
+  await p.operation({op:'memory',field:'notes',content:'migration retains memory'});
+  assert.equal((await (await p.conversation.submit({type:'input',content:'migration retains history'},ctx)).wait(ctx)).status,'done');
+  const history=await p.operation({op:'capture'});
+  await p.close();
+  const tools=paths(p.name).tools;
+  rmSync(join(tools,'frame.env'));
+  rmSync(join(tools,'.env.schema'));
+  writeFileSync(join(tools,'SCOPE.md'),'edited migration scope');
+  const reopened=await Frame.open(p.name,f.models,()=>{throw Error('migration must not read DEFAULT_MODEL');});
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
+    assert.ok(existsSync(join(tools,'.env.schema')));
+    assert.equal(readFileSync(join(tools,'SCOPE.md'),'utf8'),'edited migration scope');
+    assert.deepEqual(await reopened.operation({op:'capture'}),history);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'migration retains memory');
+  } finally {await reopened.close();}
+});
+test('closed frame settings migration needs no provider and preserves the saved conversation',async()=>{
+  const f=fixture();
+  const p=await Frame.open('settings-offline-migration',f.models,model);
+  const id=p.conversation.id;
+  await p.operation({op:'thinking',level:'high'});
+  await p.operation({op:'memory',field:'notes',content:'offline migration memory'});
+  assert.equal((await (await p.conversation.submit({type:'input',content:'offline migration history'},ctx)).wait(ctx)).status,'done');
+  const history=await p.operation({op:'capture'});
+  await assert.rejects(migrateFrameSettings(p.name),/already running/);
+  await p.close();
+  const tools=paths(p.name).tools;
+  rmSync(join(tools,'frame.env'));
+  rmSync(join(tools,'.env.schema'));
+  assert.deepEqual(await migrateFrameSettings(p.name),{slug:p.name,migrated:true});
+  assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
+  const source=readFileSync(join(tools,'frame.env'),'utf8');
+  assert.deepEqual(await migrateFrameSettings(p.name),{slug:p.name,migrated:false});
+  assert.equal(readFileSync(join(tools,'frame.env'),'utf8'),source);
+  assert.equal(f.faux.state.callCount,1);
+  const reopened=await Frame.open(p.name,f.models,()=>{throw Error('migrated frame must not use default');});
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual(await reopened.operation({op:'capture'}),history);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'offline migration memory');
+    assert.equal(f.faux.state.callCount,1);
+  } finally {await reopened.close();}
+});
+test('invalid saved frame configuration fails without replacing the store or retaining its lock',async()=>{
+  const f=fixture();
+  const p=await Frame.open('settings-invalid',f.models,model);
+  const id=p.conversation.id;
+  await p.operation({op:'memory',field:'notes',content:'must survive invalid settings'});
+  await p.close();
+  const tools=paths(p.name).tools,file=join(tools,'frame.env'),schema=join(tools,'.env.schema');
+  const original=readFileSync(file,'utf8'),originalSchema=readFileSync(schema,'utf8');
+  writeFileSync(file,'FRAME_MODEL=secret-invalid-marker\n');
+  await assert.rejects(Frame.open(p.name,f.models,model),error=>error instanceof Error && /invalid/.test(error.message) && !error.message.includes('secret-invalid-marker'));
+  assert.equal(readFileSync(file,'utf8'),'FRAME_MODEL=secret-invalid-marker\n');
+  writeFileSync(file,original);
+  rmSync(schema);
+  await assert.rejects(Frame.open(p.name,f.models,model),/schema|missing/i);
+  assert.equal(existsSync(schema),false);
+  writeFileSync(schema,originalSchema);
+  const reopened=await Frame.open(p.name,f.models,model);
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'must survive invalid settings');
+  } finally {await reopened.close();}
+});
+test('failed settings writes leave the runtime and saved selection unchanged',async t=>{
+  const p=await Frame.open('settings-write-failure',fixture().models,model);
+  const tools=paths(p.name).tools,original=readFileSync(join(tools,'frame.env'),'utf8');
+  const rename=t.mock.method(fs,'renameSync',()=>{throw Error('injected settings write failure');});
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(p.operation({op:'thinking',level:'high'}),/injected settings write failure/);
+    assert.equal(readFileSync(join(tools,'frame.env'),'utf8'),original);
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'off');
+    assert.equal(p.closing,false);
+  } finally {
+    rename.mock.restore();syncBuiltinESMExports();
+    await p.close();
+  }
+});
+test('a synchronization failure after publishing settings closes the frame and reconciles on reopen',async t=>{
+  const f=fixture();
+  const p=await Frame.open('settings-sync-failure',f.models,model);
+  const id=p.conversation.id,tools=paths(p.name).tools;
+  const originalSync=fs.fsyncSync;
+  const sync=t.mock.method(fs,'fsyncSync',(descriptor:number)=>{
+    if(fs.fstatSync(descriptor).isDirectory()) throw Error('injected directory sync failure');
+    originalSync(descriptor);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(p.operation({op:'thinking',level:'high'}),/saved but synchronization failed/);
+    assert.equal(p.closing,true);
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
+  } finally {
+    sync.mock.restore();syncBuiltinESMExports();
+    await p.close();
+  }
+  const reopened=await Frame.open(p.name,f.models,model);
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.equal((await reopened.conversation.agent(ctx)).thinkingLevel,'high');
+  } finally {await reopened.close();}
+});
+test('saved settings reconcile after a failed runtime projection',async t=>{
+  const f=fixture();
+  const p=await Frame.open('settings-projection-failure',f.models,model);
+  const id=p.conversation.id,tools=paths(p.name).tools;
+  const configure=t.mock.method(p.conversation,'configure',async()=>{throw Error('injected projection failure');});
+  try {
+    await assert.rejects(p.operation({op:'thinking',level:'high'}),/injected projection failure/);
+    assert.equal(p.closing,true);
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
+  } finally {configure.mock.restore();await p.close();}
+  const reopened=await Frame.open(p.name,f.models,model);
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.equal((await reopened.conversation.agent(ctx)).thinkingLevel,'high');
+  } finally {await reopened.close();}
+});
+test('concurrent frame setting updates serialize without losing model or thinking changes',async()=>{
+  const alternate={provider:'test',modelId:'alternate'};
+  const provider=fauxProvider({provider:'test',models:[{id:model.modelId},{id:alternate.modelId}]});
+  const models=createModels();models.setProvider(provider.provider);
+  const p=await Frame.open('settings-concurrent',models,model);
+  try {
+    await Promise.all([
+      p.operation({op:'model',...alternate}),
+      p.operation({op:'thinking',level:'high'}),
+      p.operation({op:'model',...model}),
+    ]);
+    assert.deepEqual(readFrameSettings(paths(p.name).tools),{model,thinkingLevel:'high'});
+    assert.deepEqual((await p.conversation.agent(ctx)).model,model);
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
+    assert.equal(provider.state.callCount,0);
+  } finally {await p.close();}
+});
 test('provider switching preserves running tools, queued input, memory and the saved conversation',async()=>{
   const effect=join(directory,'model-effect'),release=join(directory,'model-release');
   const alternate={provider:'second',modelId:'test-alternate'};
@@ -91,7 +266,7 @@ test('provider switching preserves running tools, queued input, memory and the s
   try {
     const conversationId=p.conversation.id;
     await p.operation({op:'memory',field:'notes',content:'preserved model memory'});
-    await p.conversation.configure({thinkingLevel:'high'},ctx);
+    await p.operation({op:'thinking',level:'high'});
     const initial=await request('model-switch',{op:'model'});
     assert.deepEqual(initial.current,model);
     assert.ok(initial.choices.some((choice:any)=>choice.modelId===alternate.modelId));
@@ -144,7 +319,7 @@ test('native model thinking preferences apply on selection and preserve explicit
     p=await Frame.open('thinking-preferences',models,selected);
     const id=p.conversation.id;
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
-    await p.conversation.configure({thinkingLevel:'high'},ctx);
+    await p.operation({op:'thinking',level:'high'});
     await p.close();p=undefined;
     p=await Frame.open('thinking-preferences',models,other);
     assert.equal(p.conversation.id,id);
@@ -154,7 +329,7 @@ test('native model thinking preferences apply on selection and preserve explicit
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
     await p.operation({op:'model',...selected});
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
-    await p.conversation.configure({thinkingLevel:null},ctx);
+    await p.operation({op:'thinking',level:null});
     await p.close();p=undefined;
     p=await Frame.open('thinking-preferences',models,other);
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');

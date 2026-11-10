@@ -1,12 +1,14 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { root, framesRoot, slug, Store, envelope, locked, lock, configured, frameTypes, paths } from './store.js';
+import { root, framesRoot, slug, Store, envelope, locked, lock, configured, frameTypes, paths, prepare } from './store.js';
+import { applyEnvironment, frameEnvironment } from './config.js';
+import { readFrameSettings } from './frame-config.js';
 import { request, running } from './ipc.js';
 import { migrateFrames } from './migration.js';
 import { models } from './models.js';
-import { consultationDefaults, modelReference } from './providers.js';
-import { Frame, capture, ctx } from './frame.js';
+import { modelReference } from './providers.js';
+import { Frame, capture, ctx, migrateFrameSettings } from './frame.js';
 import { selectFrame, startTui } from './tui.js';
 import { openFrame, openSelector, listViews, openShell, closeBrowsers, stopServer } from '../tmux/index.js';
 import { Harness, createRegistry } from '@earendil-works/pi-durable';
@@ -43,6 +45,7 @@ async function cleanup(current?:Frame) {
 async function main() {
   const command=process.argv[2] || 'open';const destination=process.argv[3] || process.env.slug;
   const type=process.env.TYPE || undefined;
+  if(command==='config-check') {console.log('Instance configuration valid.');return;}
   if(command==='migrate') {
     console.log(JSON.stringify(migrateFrames(process.env.INPUT || join(root,'panes'),framesRoot),null,2));
     console.log('Reopen migrated frames before further work; existing processes retain their old paths.');
@@ -74,10 +77,14 @@ async function main() {
   }
   if(command==='window') return openShell();
   if(command==='consult') {
+    if(process.env.PHILBY_FRAME) {
+      const frame=slug(process.env.PHILBY_FRAME);
+      applyEnvironment(frameEnvironment(paths(frame).tools,frame,framesRoot));
+    }
     const route=process.env.ROUTE || 'ask';
-    const defaults:Record<string,string>=consultationDefaults;
     if(!['ask','reason','twitter'].includes(route)) throw Error(`Unknown consultation route: ${route}`);
-    const id=process.env[route.toUpperCase()+'_MODEL'] || defaults[route];
+    const id=process.env[route.toUpperCase()+'_MODEL'];
+    if(!id) throw Error(`Missing ${route.toUpperCase()}_MODEL`);
     const config=await models(id);
     const {MemoryStorage}=await import('@earendil-works/pi-durable');
     const harness=await Harness.open(new MemoryStorage(),{models:config.models,registry:createRegistry()},ctx);
@@ -93,8 +100,16 @@ async function main() {
   const selected=destination || process.env.PHILBY_FRAME;
   if(!selected) throw Error(`Supply slug=<frame> for ${command}, or run from a frame`);
   const name=slug(selected);
+  if(command==='config-migrate') {console.log(JSON.stringify(await migrateFrameSettings(name)));return;}
+  if(command==='frame-config-check') {
+    frameEnvironment(paths(name).tools,name,framesRoot);
+    if(!readFrameSettings(paths(name).tools)) throw Error('Missing frame.env; open a new frame or run make frame-config-migrate for a saved frame');
+    console.log(`Frame ${name} configuration valid.`);return;
+  }
   if(command==='serve') {
-    const config=await models();const frame=await Frame.open(name,config.models,()=>config.model ?? modelReference(process.env.DEFAULT_MODEL));
+    const environment=frameEnvironment(prepare(name).tools,name,framesRoot);
+    applyEnvironment(environment);
+    const config=await models();const frame=await Frame.open(name,config.models,()=>config.model ?? modelReference(process.env.DEFAULT_MODEL),environment);
     const close=()=>{void frame.close().catch(e=>{console.error(String(e));process.exitCode=1;});};
     for(const signal of ['SIGTERM','SIGINT','SIGHUP'] as const) process.on(signal,close);
     if(process.stdin.isTTY) await startTui(frame,()=>cleanup(frame));
@@ -107,6 +122,10 @@ async function main() {
     try {console.log(JSON.stringify(await capture(await h.root(ctx),process.env.ALL==='1'),null,2));}finally{await h.close(ctx);release();}return;
   }
   const op:Record<string,unknown>={op:command==='new-session'?'new':command};
+  if(command==='thinking') {
+    if(!process.env.LEVEL) throw Error('Supply LEVEL=off|minimal|low|medium|high|xhigh|max|default');
+    op.level=process.env.LEVEL==='default'?null:process.env.LEVEL;
+  }
   if(command==='memory' && process.env.FIELD) Object.assign(op,{field:process.env.FIELD,content:await prompt()});
   if(command==='plan-set') {
     const activeEnv=process.env.ACTIVE;

@@ -1,5 +1,6 @@
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, AgentDoc, LiveDoc, InboxDoc, ResetEntry, type Conversation, type ToolRegistration } from '@earendil-works/pi-durable';
+import { createRegistry, defineDoc, defineExtension, defineTask, section, wrapTool, configure, Harness, AgentDoc, LiveDoc, InboxDoc, ResetEntry, ROOT_CONVERSATION_ID, type Conversation, type ToolRegistration } from '@earendil-works/pi-durable';
+import { createModels } from '@earendil-works/pi-ai';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -14,6 +15,8 @@ import { listen, type Command } from './ipc.js';
 import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
 import { harnessSettings, modelThinkingLevel } from './settings.js';
+import { frameEnvironment } from './config.js';
+import { FrameSettingsWriteError, readFrameSettings, writeFrameSettings, type FrameSettings } from './frame-config.js';
 export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
 export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
@@ -74,6 +77,8 @@ export class Frame {
   onError: (error: unknown) => void = e => console.error(String(e));
   private closure?: Promise<void>;
   private boot = false;
+  private shellEnv!:NodeJS.ProcessEnv;
+  private settingsUpdate:Promise<unknown>=Promise.resolve();
   private readonly makefiles: Record<string,string>;
   private constructor(readonly name: string, readonly models: Models) {
     this.makefiles={shared:join(root,'shared','Makefile'),frame:join(paths(name).tools,'Makefile')};
@@ -81,18 +86,20 @@ export class Frame {
   private tools() {
     return Object.fromEntries(Object.entries(this.makefiles).map(([name,file])=>[name,readFileSync(file,'utf8')]));
   }
-  static async open(name: string, models: Models, model: ModelReference | (()=>ModelReference)) {
+  static async open(name: string, models: Models, model: ModelReference | (()=>ModelReference), environment?:NodeJS.ProcessEnv) {
     const p = new Frame(name,models);
     p.release = lock(name);
     try {
       const dirs = prepare(name);
+      p.shellEnv=environment ?? frameEnvironment(dirs.tools,name,framesRoot);
+      let savedSettings=readFrameSettings(dirs.tools);
       const guidance=readFileSync(join(root,'FRAME.md'),'utf8');
       const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8');
       const settings=harnessSettings();
       p.tools();
       const boot=existsSync(join(dirs.tools,'BOOT.md')) ? readFileSync(join(dirs.tools,'BOOT.md'),'utf8').trim() : '';
       p.store = new Store(name);
-      p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:{...process.env, PHILBY_FRAME:name, PHILBY_ROOT:root, PHILBY_FRAMES_DIR:framesRoot}});
+      p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:p.shellEnv});
       const registry = createRegistry(); registry.install(CodingTools);
       registry.install(defineExtension({name:'philby', tasks:[Startup], sections:[
         section('frame', () => `Your frame is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.`),
@@ -111,18 +118,21 @@ export class Frame {
       ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
       p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, settings, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
       p.conversation = await p.harness.root(ctx, {init:async(tx,id)=>{
-        const initial=typeof model==='function'?model():model;
+        const initial=savedSettings?.model ?? (typeof model==='function'?model():model);
         if(!models.getModel(initial.provider,initial.modelId)) throw Error(`Model unavailable: ${initial.provider}/${initial.modelId}`);
         await configure(tx,id,{model:initial,cwd:dirs.tools});
       }});
-      const selected=(await p.conversation.agent(ctx)).model;
+      const stored=await p.harness.snapshot(AgentDoc,p.conversation.id,ctx);
+      const selected=savedSettings?.model ?? stored?.model;
       if(!selected) throw Error('Saved conversation has no model');
       const selectedModel=models.getModel(selected.provider,selected.modelId);
       if(!selectedModel) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
-      if((await p.harness.snapshot(AgentDoc,p.conversation.id,ctx))?.thinkingLevel===undefined) {
-        const thinkingLevel=modelThinkingLevel(selectedModel);
-        if(thinkingLevel!==undefined) await p.conversation.configure({thinkingLevel},ctx);
+      if(!savedSettings) {
+        savedSettings={model:selected,...(stored?.thinkingLevel===undefined?{}:{thinkingLevel:stored.thinkingLevel})};
+        writeFrameSettings(dirs.tools,savedSettings);
       }
+      const thinkingLevel=savedSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
+      await p.conversation.configure({model:selected,thinkingLevel:thinkingLevel ?? null},ctx);
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       p.server = await listen(name, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
@@ -134,6 +144,28 @@ export class Frame {
       return p;
     } catch(e) { await p.close(); throw e; }
   }
+  private updateSettings(change:(current:FrameSettings)=>FrameSettings) {
+    const update=this.settingsUpdate.then(async()=>{
+      if(this.closing) throw Error('Frame is closing');
+      const directory=paths(this.name).tools;
+      const current=readFrameSettings(directory);
+      if(!current) throw Error('Missing frame.env');
+      const next=change(current);
+      let published=false;
+      try {
+        writeFrameSettings(directory,next);
+        published=true;
+        const selected=this.models.getModel(next.model.provider,next.model.modelId);
+        if(!selected) throw Error('Configured frame model unavailable');
+        await this.conversation.configure({model:next.model,thinkingLevel:next.thinkingLevel ?? modelThinkingLevel(selected) ?? null},ctx);
+      } catch(error) {
+        if(published || error instanceof FrameSettingsWriteError) await this.close();
+        throw error;
+      }
+    });
+    this.settingsUpdate=update.catch(()=>{});
+    return update;
+  }
   async operation(c: Command): Promise<unknown> {
     if (this.closing) throw Error('Frame is closing');
     switch(c.op) {
@@ -144,13 +176,18 @@ export class Frame {
           const target=typeof c.provider==='string' && typeof c.modelId==='string' ? this.models.getModel(c.provider,c.modelId) : undefined;
           if(!target) throw Error(`Model unavailable: ${c.provider}/${c.modelId}`);
           const thinkingLevel=modelThinkingLevel(target);
-          await this.conversation.configure({model:{provider:target.provider,modelId:target.id},...(thinkingLevel===undefined?{}:{thinkingLevel})},ctx);
+          await this.updateSettings(current=>({model:{provider:target.provider,modelId:target.id},...((thinkingLevel ?? current.thinkingLevel)===undefined?{}:{thinkingLevel:thinkingLevel ?? current.thinkingLevel})}));
         }
         const current=(await this.conversation.agent(ctx)).model;
         if(!current) throw Error('Frame has no configured model');
         const choices=await modelChoices(this.models,error=>errors.push(error.message));
         if(!choices.some(choice=>choice.provider===current.provider && choice.modelId===current.modelId)) choices.unshift({...current,label:current.modelId,description:'Current model (unavailable)'});
         return {current,choices,errors} satisfies ModelSelection;
+      }
+      case 'thinking': {
+        if(c.level!==null && typeof c.level!=='string') throw Error('Supply a thinking level or null to use the Pi preference');
+        await this.updateSettings(current=>({model:current.model,...(c.level===null?{}:{thinkingLevel:c.level as FrameSettings['thinkingLevel']})}));
+        return {saved:true};
       }
       case 'input': {
         const content = String(c.content ?? ''); if (!content.trim()) throw Error('Empty prompt');
@@ -242,7 +279,7 @@ export class Frame {
         try { await this.harness?.close(ctx); }
         finally {
           try {
-            if(this.boot) await promisify(execFile)('make',['--no-print-directory','-C',paths(this.name).tools,'close'],{env:{...process.env,PHILBY_ROOT:root,PHILBY_FRAMES_DIR:framesRoot,PHILBY_FRAME:this.name},timeout:60000});
+            if(this.boot) await promisify(execFile)('make',['--no-print-directory','-C',paths(this.name).tools,'close'],{env:this.shellEnv,timeout:60000});
           }
           finally {
             try { await this.env?.cleanup(ctx); }
@@ -257,4 +294,24 @@ export class Frame {
     })();
     return this.closure;
   }
+}
+
+export async function migrateFrameSettings(name:string) {
+  if(!existsSync(join(paths(name).state,'durable.sqlite'))) throw Error(`Frame ${name} has no saved conversation; open it to initialize settings`);
+  const release=lock(name);
+  try {
+    const directory=paths(name).tools;
+    if(readFrameSettings(directory)) return {slug:name,migrated:false};
+    const database=join(paths(name).state,'durable.sqlite');
+    if(!existsSync(database)) throw Error(`Frame ${name} has no saved conversation; open it to initialize settings`);
+    const harness=await Harness.open(await openNodeSqliteStorage(database),{models:createModels(),registry:createRegistry()},ctx);
+    try {
+      const conversation=await harness.conversation(ROOT_CONVERSATION_ID,ctx);
+      if(!conversation) throw Error(`Frame ${name} has no saved conversation`);
+      const saved=await harness.snapshot(AgentDoc,conversation.id,ctx);
+      if(!saved?.model) throw Error(`Frame ${name} has no saved model`);
+      writeFrameSettings(directory,{model:saved.model,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
+      return {slug:name,migrated:true};
+    } finally {await harness.close(ctx);}
+  } finally {release();}
 }

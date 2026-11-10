@@ -1,6 +1,6 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -14,6 +14,7 @@ function fixture(t:TestContext) {
   const ambient=join(directory,'ambient');
   const cwd=join(directory,'elsewhere');
   for(const path of [agent,ambient,cwd]) mkdirSync(path,{recursive:true});
+  copyFileSync(new URL('../../.env.schema',import.meta.url),join(root,'.env.schema'));
   writeFileSync(join(root,'.env'),'PHILBY_CONFIG_TEST_KEY=checkout-environment-key\n');
   const env={PATH:process.env.PATH,PHILBY_ROOT:root,PI_CODING_AGENT_DIR:ambient,PI_OFFLINE:'1'};
   return {directory,root,agent,ambient,cwd,env};

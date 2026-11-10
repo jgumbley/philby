@@ -7,6 +7,7 @@ import { join } from 'node:path';
 const directory=mkdtempSync(join(tmpdir(),'philby-recipes-'));
 process.env.PHILBY_ROOT=directory;
 process.env.PHILBY_FRAMES_DIR=join(directory,'tools');
+cpSync(new URL('../../.env.schema',import.meta.url),join(directory,'.env.schema'));
 cpSync(new URL('../../frame-types/plain',import.meta.url),join(directory,'frame-types','plain'),{recursive:true});
 const recipe=join(directory,'frame-types','fixture');
 mkdirSync(recipe,{recursive:true});

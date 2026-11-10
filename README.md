@@ -72,9 +72,60 @@ Custom model IDs do not need to appear in Pi's bundled catalog. Use provider IDs
 
 Native `modelThinkingLevels` in `.pi/agent/settings.json` supplies per-model thinking defaults, keyed by exact `provider/model-id`. Philby applies the target model’s configured level when selecting it, and on opening a frame whose saved conversation has no explicit thinking level. Explicit saved levels survive reopening. Pi clamps the level to the model’s supported capabilities.
 
-Root `.env` selects the default for new frames with `DEFAULT_MODEL=provider/model-id`. The first slash separates the provider from the complete model ID. Reopening a saved frame keeps its selection even when the new-frame default has changed or is absent. An unavailable saved model is reported explicitly; Philby does not replace the conversation or silently choose another model. Model changes preserve conversation, memory and queued work.
+Root `.env` selects the default for new frames with `DEFAULT_MODEL=provider/model-id`. The first slash separates the provider from the complete model ID. Each frame saves its selection in `frame.env`, validated against `shared/frame.env.schema`. Reopening uses that file even when the new-frame default has changed or is absent. An unavailable saved model is reported explicitly; Philby does not replace the conversation or silently choose another model. Model changes preserve conversation, memory and queued work.
 
 Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read. Configure the required providers through `make full-pi` and `.pi/agent/models.json` before reopening existing frames. Consultation helpers use the same runtime; they do not add synthetic model aliases.
+
+## Configuration
+
+[Varlock](https://varlock.dev/guides/schema/) validates configuration before a frame starts. Instance means this Philby checkout and its frames. The files have these roles:
+
+| File | Purpose |
+| --- | --- |
+| `.env.schema` | Instance settings, types and nonsecret defaults |
+| `.env` | Private instance values |
+| `shared/frame.env.schema` | Standard schema for saved frame settings |
+| `frames/<slug>/frame.env` | This frame's saved model and optional thinking preference |
+| `frames/<slug>/.env.schema` | Additional schema for this frame's tools |
+| `frames/<slug>/.env` | Private values for this frame's tools |
+
+A saved settings file looks like:
+
+```dotenv
+FRAME_MODEL="openai/gpt-6.1-sol"
+FRAME_THINKING_LEVEL=high
+```
+
+`FRAME_MODEL` is required. `FRAME_THINKING_LEVEL` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; leaving it blank uses Pi's model thinking preference. Pi applies the model's capability limits. These settings are literal values, validated by the common schema. Unknown keys, duplicate keys and malformed values fail. Environment variables and private tool files cannot override saved frame settings.
+
+`/model` updates `frame.env` atomically before applying the choice to the existing conversation. To save a thinking preference on a running frame, use `make frame-thinking slug=research LEVEL=high`; `LEVEL=default` clears that preference. Edit `frame.env` directly only while the frame is closed, then reopen it. Durable retains the active projection of these settings alongside its conversation state. The file is authoritative when reopening; conversation history, memory, plans, mailbox records and queued work remain in their existing stores.
+
+For tool configuration, Varlock loads the instance directory followed by the frame directory. Frame values override instance values; explicit invocation environment variables take precedence over both. Varlock's `.env.local` and environment-specific file rules still apply. Philby passes explicit paths, including when `PHILBY_FRAMES_DIR` relocates frames. It tracks which environment values came from configuration so launching another frame does not turn the first frame's values into invocation overrides. Tmux launches use private environment snapshots, avoiding stale server values and keeping configuration values out of command arguments.
+
+Define additional tool keys in the frame's `.env.schema`, for example:
+
+```dotenv
+# @defaultRequired=true
+# @defaultSensitive=true
+
+# @type=url
+SERVICE_URL=
+
+# @type=string
+SERVICE_TOKEN=
+```
+
+Put the values in that frame's ignored `.env`. `PHILBY_*`, `PI_CODING_AGENT_DIR`, `FRAME_MODEL` and `FRAME_THINKING_LEVEL` are reserved in frame tool configuration. Philby controls frame identity, storage paths and the Pi directory. Schemas contain Varlock decorators; credential values belong in private files or Pi's credential store. Root and recipe schemas are tracked; `.env` files remain ignored. Pi continues to own provider definitions, login, token refresh, model catalogs and compaction.
+
+```sh
+make config-check
+make frame-config-check slug=research
+make frame-config-migrate slug=research
+```
+
+Checks print success or invalid key names without configuration values. The migration target requires a closed frame with a saved conversation and writes its exact saved model and explicit thinking preference to `frame.env`. It does not start a provider or resume work. Opening an existing frame without `frame.env` performs the same settings extraction under the frame's lifetime lock. A missing tool schema is added once during this upgrade; existing schemas, values and edited recipe files are preserved. After migration, a missing schema or malformed settings file is an error. No conversations are imported or replaced.
+
+Frame startup validates tool configuration before recovering work. Tools and teardown receive the same resolved environment. Reopen a frame after changing its tool configuration; there is no hot reload in its running process. Consultation commands launched by its tools load that frame's configuration. Stop, close, status and mailbox commands do not load the frame's tool schema, so a broken frame configuration does not prevent controlling its existing process. Instance configuration must remain valid to locate frames.
 
 ## Compaction
 
