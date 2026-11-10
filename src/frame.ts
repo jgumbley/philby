@@ -9,7 +9,7 @@ import { readFileSync, rmSync, existsSync } from 'node:fs';
 import type { Server } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { envelope, lock, prepare, paths, root, panesRoot, Store, type Envelope } from './store.js';
+import { envelope, lock, prepare, paths, root, framesRoot, Store, type Envelope } from './store.js';
 import { listen, type Command } from './ipc.js';
 import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
@@ -53,14 +53,14 @@ const Startup = defineTask<{prompt:string}, {phase:'startup'}, null>({
   name:'philby.startup', version:1, initial:()=>({phase:'startup'}),
   phases:{startup:async(task,runtime,context)=>{
     const conversation=(await runtime.conversation(runtime.conversationId,context))!;
-    const submission=await conversation.submit({type:'input',whenBusy:'followUp',requestId:`startup:${task.id}`,entry:{kind:'philby.startup'},content:`Opening checklist from BOOT.md:\n${task.input.prompt}\nInspect current state before changing it. Use the pane's Make targets and verify the result. Report failures explicitly.`},context);
+    const submission=await conversation.submit({type:'input',whenBusy:'followUp',requestId:`startup:${task.id}`,entry:{kind:'philby.startup'},content:`Opening checklist from BOOT.md:\n${task.input.prompt}\nInspect current state before changing it. Use the frame's Make targets and verify the result. Report failures explicitly.`},context);
     const result=await submission.wait(context);
     if(result.status!=='done') throw Error(`Opening checklist ${result.status}`);
     await runtime.commit(()=>({status:'terminal',outcome:{status:'completed',result:null}}),context);
   }},
   abort:async(_task,runtime,context)=>{await runtime.commit(()=>({status:'terminal',outcome:{status:'aborted'}}),context);}
 });
-export class Pane {
+export class Frame {
   harness!: Harness;
   conversation!: Conversation;
   store!: Store;
@@ -76,28 +76,28 @@ export class Pane {
   private boot = false;
   private readonly makefiles: Record<string,string>;
   private constructor(readonly name: string, readonly models: Models) {
-    this.makefiles={shared:join(root,'shared','Makefile'),pane:join(paths(name).tools,'Makefile')};
+    this.makefiles={shared:join(root,'shared','Makefile'),frame:join(paths(name).tools,'Makefile')};
   }
   private tools() {
     return Object.fromEntries(Object.entries(this.makefiles).map(([name,file])=>[name,readFileSync(file,'utf8')]));
   }
   static async open(name: string, models: Models, model: ModelReference | (()=>ModelReference)) {
-    const p = new Pane(name,models);
+    const p = new Frame(name,models);
     p.release = lock(name);
     try {
       const dirs = prepare(name);
-      const guidance=readFileSync(join(root,'PANE.md'),'utf8');
+      const guidance=readFileSync(join(root,'FRAME.md'),'utf8');
       const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8');
       const settings=harnessSettings();
       p.tools();
       const boot=existsSync(join(dirs.tools,'BOOT.md')) ? readFileSync(join(dirs.tools,'BOOT.md'),'utf8').trim() : '';
       p.store = new Store(name);
-      p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:{...process.env, PHILBY_PANE:name, PHILBY_ROOT:root, PHILBY_PANES_DIR:panesRoot}});
+      p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:{...process.env, PHILBY_FRAME:name, PHILBY_ROOT:root, PHILBY_FRAMES_DIR:framesRoot}});
       const registry = createRegistry(); registry.install(CodingTools);
       registry.install(defineExtension({name:'philby', tasks:[Startup], sections:[
-        section('pane', () => `Your pane is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_PANE, PHILBY_ROOT and PHILBY_PANES_DIR.`),
-        section('pane-guidance', () => guidance || undefined),
-        section('pane-scope', () => scope || undefined),
+        section('frame', () => `Your frame is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.`),
+        section('frame-guidance', () => guidance || undefined),
+        section('frame-scope', () => scope || undefined),
         ...Object.entries(p.makefiles).map(([name,file])=>section(`${name}-tools`,()=>{
           let source: string;
           try {source=readFileSync(file,'utf8');}
@@ -135,7 +135,7 @@ export class Pane {
     } catch(e) { await p.close(); throw e; }
   }
   async operation(c: Command): Promise<unknown> {
-    if (this.closing) throw Error('Pane is closing');
+    if (this.closing) throw Error('Frame is closing');
     switch(c.op) {
       case 'status': return {slug:this.name,pid:process.pid, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.store.updates(), work:await this.harness.inspect(ctx)};
       case 'model': {
@@ -147,7 +147,7 @@ export class Pane {
           await this.conversation.configure({model:{provider:target.provider,modelId:target.id},...(thinkingLevel===undefined?{}:{thinkingLevel})},ctx);
         }
         const current=(await this.conversation.agent(ctx)).model;
-        if(!current) throw Error('Pane has no configured model');
+        if(!current) throw Error('Frame has no configured model');
         const choices=await modelChoices(this.models,error=>errors.push(error.message));
         if(!choices.some(choice=>choice.provider===current.provider && choice.modelId===current.modelId)) choices.unshift({...current,label:current.modelId,description:'Current model (unavailable)'});
         return {current,choices,errors} satisfies ModelSelection;
@@ -204,7 +204,7 @@ export class Pane {
           const inbox = await tx.doc(InboxDoc, this.conversation.id);
           if(inbox.items.length > 0) throw Error('Cannot start a new session while work is queued. Wait for queued work to complete or stop it with /stop.');
           const pending = this.store.pending().filter(e => e.kind === 'input');
-          if(pending.length > 0) throw Error('Cannot start a new session while messages are pending delivery. Wait for delivery or stop the pane.');
+          if(pending.length > 0) throw Error('Cannot start a new session while messages are pending delivery. Wait for delivery or stop the frame.');
           const plan = await tx.doc(PlanMode, this.conversation.id);
           plan.active = false;
           plan.plan = '';
@@ -242,7 +242,7 @@ export class Pane {
         try { await this.harness?.close(ctx); }
         finally {
           try {
-            if(this.boot) await promisify(execFile)('make',['--no-print-directory','-C',paths(this.name).tools,'close'],{env:{...process.env,PHILBY_ROOT:root,PHILBY_PANES_DIR:panesRoot,PHILBY_PANE:this.name},timeout:60000});
+            if(this.boot) await promisify(execFile)('make',['--no-print-directory','-C',paths(this.name).tools,'close'],{env:{...process.env,PHILBY_ROOT:root,PHILBY_FRAMES_DIR:framesRoot,PHILBY_FRAME:this.name},timeout:60000});
           }
           finally {
             try { await this.env?.cleanup(ctx); }

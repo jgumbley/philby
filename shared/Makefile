@@ -35,7 +35,7 @@ GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login go
 help:
 	@echo 'provider-models [PROVIDER=name] — list available chat models from Pi'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
-	@echo 'ask reason twitter — fresh independent consultations, no local tools or pane context'
+	@echo 'ask reason twitter — fresh independent consultations, no local tools or frame context'
 	@echo 'PROMPT_FILE (absolute or relative to current directory), prompt, or stdin; override *_MODEL'
 	@echo 'Browser: BROWSER=chrome|firefox is required; connect to an existing browser, never launch one'
 	@echo 'browser-connect / browser-disconnect — open or stop the persistent browser service pane'
@@ -44,7 +44,7 @@ help:
 	@echo 'Scripts receive browser and page; TAB=unique case-insensitive URL/title substring selects page'
 	@echo 'Without TAB, page is undefined; browser is always available'
 	@echo 'BROWSER_ENDPOINT=ws://... or wss://... overrides Chrome channel discovery / Firefox localhost:9222/session'
-	@echo 'Calls share the pane connection and serialize. Status shows the busy caller and queue. Scripts are never replayed.'
+	@echo 'Calls share the service connection and serialize. Status shows the busy caller and queue. Scripts are never replayed.'
 	@echo 'browser-check / browser-test — validate shared/browser; setup and examples: shared/browser/README.md'
 	@echo 'ocr INPUT=local.pdf|png|jpg|jpeg [OUTPUT=new.txt] — local English text extraction with Scribe.js'
 	@echo 'ocr-diagnose / ocr-check / ocr-test — check dependencies / syntax / temporary document tests'

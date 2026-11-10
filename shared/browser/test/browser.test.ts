@@ -88,9 +88,9 @@ for (const browser of ['chrome', 'firefox'] as const) {
         BROWSER: browser,
         BROWSER_ENDPOINT: endpoint,
         TMPDIR: directory,
-        PHILBY_PANES_DIR: join(directory, 'panes'),
+        PHILBY_FRAMES_DIR: join(directory, 'frames'),
         PHILBY_TMUX_SOCKET: `philby-browser-${process.pid}-${browser}`,
-        PHILBY_PANE: 'browser-test',
+        PHILBY_FRAME: 'browser-test',
       };
       for (const name of ['PROMPT', 'PROMPT_FILE', 'TAB', 'TMUX', 'TMUX_PANE']) delete env[name];
       cleanupTmux = () => {
@@ -165,7 +165,7 @@ for (const browser of ['chrome', 'firefox'] as const) {
         assert.equal(await run('return page === undefined;', {}), true);
         assert.equal(await run('', { PROMPT: 'await browser.pages();' }), null);
         assert.equal((await status()).pid, initial.pid);
-        if (existsSync(env.PHILBY_PANES_DIR!)) assert.ok(readdirSync(env.PHILBY_PANES_DIR!, { recursive: true }).every(file => !String(file).endsWith('durable.sqlite')));
+        if (existsSync(env.PHILBY_FRAMES_DIR!)) assert.ok(readdirSync(env.PHILBY_FRAMES_DIR!, { recursive: true }).every(file => !String(file).endsWith('durable.sqlite')));
       });
 
       await t.test('requires an unambiguous page and reports script failures without repetition', async () => {

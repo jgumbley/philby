@@ -56,7 +56,7 @@ JS
 
 Navigation, clicks, filling fields, keyboard input and screenshots use ordinary Puppeteer methods. Call `await page.bringToFront()` before interacting with a background tab. For example, `await page.locator('input[name="search"]').fill('Philby')` fills a field, and `await page.screenshot({path: '/absolute/path/page.png'})` saves a screenshot. [Puppeteer documents differences between Chrome and Firefox](https://pptr.dev/webdriver-bidi).
 
-The shared wrapper delegates with `make -f`, preserving its caller's working directory. Each request carries that directory to the service, so relative prompt and output paths retain their caller's meaning. `make -C shared` sets that directory to `shared`. Use absolute paths when invoking from a pane, or use `make -f "$PHILBY_ROOT/shared/Makefile"` to retain the pane's directory.
+The shared wrapper delegates with `make -f`, preserving its caller's working directory. Each request carries that directory to the service, so relative prompt and output paths retain their caller's meaning. `make -C shared` sets that directory to `shared`. Use absolute paths when invoking from a frame, or use `make -f "$PHILBY_ROOT/shared/Makefile"` to retain the frame's directory.
 
 ## Service lifetime and concurrency
 
@@ -64,7 +64,7 @@ Each browser has one service pane in the workspace. A per-user SQLite lock is he
 
 Connection startup has a 120-second deadline, including Chrome approval. Requests wait up to 60 seconds in the queue; scripts have a 120-second execution deadline.
 
-Detaching from tmux leaves the service running. Closing an ordinary agent pane preserves an idle service; if it cancels an active browser request, the failure rules below apply. `browser-disconnect`, closing the service pane, or workspace cleanup stops it and releases the connection. There is no idle timeout or automatic restart. To connect again after shutdown, run `browser-connect` explicitly.
+Detaching from tmux leaves the service running. Closing an ordinary agent frame preserves an idle service; if it cancels an active browser request, the failure rules below apply. `browser-disconnect`, closing the service pane, or workspace cleanup stops it and releases the connection. There is no idle timeout or automatic restart. To connect again after shutdown, run `browser-connect` explicitly.
 
 ```sh
 make -C shared browser-disconnect BROWSER=chrome
@@ -77,7 +77,7 @@ Disconnecting leaves the browser and its tabs open. Scripts may explicitly close
 
 A normal awaited script error fails that request while preserving the service for later commands. Cancelling a queued request removes only that request. Cancellation, deadline expiry or loss of the calling client during an active request shuts down the service and fails pending requests. A browser disconnection also requires an explicit new connection. Errors exit nonzero; scripts are never automatically retried or replayed. An action may already have happened before a failure, so inspect the page before retrying a write.
 
-An independent watchdog enforces the active request's deadline and detects caller exit even when script code blocks Node's event loop. Failed service panes retain their diagnostic output. An unresponsive service is forcibly terminated when explicitly disconnected or during workspace cleanup, and the command reports the interruption.
+An independent watchdog enforces the active request's deadline and detects caller exit even when script code blocks Node's event loop. Failed service frames retain their diagnostic output. An unresponsive service is forcibly terminated when explicitly disconnected or during workspace cleanup, and the command reports the interruption.
 
 Firefox can retain its single BiDi session after a forced process termination. If reconnecting reports an occupied session, restart Firefox normally with remote debugging enabled, then run `browser-connect` again. The tool does not restart your browser automatically.
 

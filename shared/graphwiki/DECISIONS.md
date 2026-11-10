@@ -26,7 +26,7 @@ artificial source pages.
 Optional `sources` wikilinks include resolvable referenced pages in context
 results. Unresolved wikilinks produce structural warnings; standalone pages
 and missing citations remain valid. Citation quality and factual accuracy are
-editorial responsibilities of the writing pane.
+editorial responsibilities of the writing frame.
 
 ## Publication and integration
 
@@ -37,9 +37,9 @@ does not rename, delete, concurrently merge, or transact across a whole graph.
 Keep drafts unchanged when retrying a stable change identifier, and retain
 `.graphwiki/` with the graph's backups.
 
-One pane owns publication to a graph. Shared Philby commands serialize per
+One frame owns publication to a graph. Shared Philby commands serialize per
 canonical graph path. External editors and synchronisation software must obey
-the same single-writer contract. The pane's Durable conversation and working
+the same single-writer contract. The frame's Durable conversation and working
 memory remain separate from the Markdown graph.
 
 The Make interface builds incrementally with locked Cargo dependencies and

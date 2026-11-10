@@ -9,7 +9,7 @@ review required before publishing.
 
 ## Commands
 
-Run from the owning pane:
+Run from the owning frame:
 
 ```sh
 make editorial-check
@@ -26,10 +26,10 @@ paths, line numbers and reasons and return a nonzero status. Missing files,
 unreadable directories and invalid change identifiers fail explicitly.
 
 `publish` runs the check before the shared publisher. `lint` runs structural
-validation and the editorial check against published content. Use these pane
+validation and the editorial check against published content. Use these frame
 targets; the shared engine deliberately accepts ordinary Markdown and does
-not enforce this pane's authoring conventions. `GRAPH_ROOT` is supplied by the
-pane Makefile; `CHANGE` is an optional environment input to `editorial.mjs`.
+not enforce this frame's authoring conventions. `GRAPH_ROOT` is supplied by the
+frame Makefile; `CHANGE` is an optional environment input to `editorial.mjs`.
 No prompts, credentials, network or model calls are used by the checker.
 
 The mechanical check rejects provenance properties, dated journal wikilinks,
@@ -46,13 +46,13 @@ Inspect new tools first with `make help` and `make editorial-check`. Verify
 changes manually through these Make targets using a temporary copy of the
 recipe with isolated Markdown fixtures. Exercise a clean concept, provenance
 in an article, the same provenance in a journal, a proposed replacement and
-a rejected publication. Do not add automated tests for this pane workflow.
+a rejected publication. Do not add automated tests for this frame workflow.
 
-## Existing panes
+## Existing frames
 
-The recipe is copied only at pane creation. Update an existing pane's scope,
+The recipe is copied only at frame creation. Update an existing frame's scope,
 Make targets and editorial tool deliberately, preserving its local tools and
-viewer configuration. Close the pane before editing its graph; reopen it to
+viewer configuration. Close the frame before editing its graph; reopen it to
 load scope changes. Never edit completed publication drafts or recovery state.
 Clean existing articles in a new publication, preserving their evidence in
 the journal. Publishing does not delete or rename articles; do not bypass it

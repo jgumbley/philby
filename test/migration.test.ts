@@ -1,0 +1,56 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
+import { frameText, migrateFrames } from '../src/migration.js';
+
+const directory=mkdtempSync(join(tmpdir(),'philby-migration-'));
+test('migration renames complete directories without replacing private state or edited tools',()=>{
+  const source=join(directory,'panes'),destination=join(directory,'frames');
+  const tools=join(source,'research'),state=join(tools,'.state');
+  mkdirSync(state,{recursive:true});
+  writeFileSync(join(tools,'.pane-type'),'graphwiki\n');
+  writeFileSync(join(tools,'SCOPE.md'),'Edited pane scope');
+  writeFileSync(join(tools,'Makefile'),'send:\n\tmake -C "$PHILBY_ROOT" pane-send from="$PHILBY_PANE"\n');
+  writeFileSync(join(tools,'inspect.mjs'),"const panel = 'capture-pane #{pane_id} TMUX_PANE PHILBY_PANES_DIR';\n",{mode:0o700});
+  writeFileSync(join(tools,'artifact.bin'),Buffer.from([0,255,128,1]));
+  const database=join(state,'durable.sqlite');
+  const db=new DatabaseSync(database);
+  db.exec("CREATE TABLE saved(value TEXT); INSERT INTO saved VALUES ('pane history and memory');");
+  db.close();
+  writeFileSync(join(state,'log.md'),'Private pane transcript');
+  symlinkSync('artifact.bin',join(tools,'artifact-link'));
+  const inode=statSync(database).ino;
+  const bytes=readFileSync(database);
+  assert.deepEqual(migrateFrames(source,destination),{source,destination,markers:1,editedFiles:3});
+  assert.equal(existsSync(source),false);
+  const moved=join(destination,'research');
+  assert.equal(statSync(join(moved,'.state','durable.sqlite')).ino,inode);
+  assert.deepEqual(readFileSync(join(moved,'.state','durable.sqlite')),bytes);
+  assert.equal(readFileSync(join(moved,'.state','log.md'),'utf8'),'Private pane transcript');
+  assert.equal(readFileSync(join(moved,'.frame-type'),'utf8'),'graphwiki\n');
+  assert.equal(existsSync(join(moved,'.pane-type')),false);
+  assert.equal(readFileSync(join(moved,'SCOPE.md'),'utf8'),'Edited frame scope');
+  assert.match(readFileSync(join(moved,'Makefile'),'utf8'),/frame-send from="\$PHILBY_FRAME"/);
+  assert.equal(readFileSync(join(moved,'inspect.mjs'),'utf8'),"const panel = 'capture-pane #{pane_id} TMUX_PANE PHILBY_FRAMES_DIR';\n");
+  assert.equal(statSync(join(moved,'inspect.mjs')).mode & 0o777,0o700);
+  assert.deepEqual(readFileSync(join(moved,'artifact-link')),Buffer.from([0,255,128,1]));
+});
+test('migration rejects collisions and nested destinations before changing any files',()=>{
+  const source=join(directory,'conflict');mkdirSync(join(source,'saved'),{recursive:true});
+  writeFileSync(join(source,'saved','.pane-type'),'plain\n');
+  writeFileSync(join(source,'saved','.frame-type'),'plain\n');
+  assert.throws(()=>migrateFrames(source,join(directory,'destination')),/Conflicting frame type/);
+  assert.equal(existsSync(join(source,'saved','.pane-type')),true);
+  assert.equal(existsSync(join(directory,'destination')),false);
+  assert.throws(()=>migrateFrames(source,source),/separate, non-nested/);
+  assert.throws(()=>migrateFrames(source,join(source,'nested')),/separate, non-nested/);
+  assert.throws(()=>migrateFrames(source,join(directory,'frames')),/would overwrite/);
+  assert.throws(()=>migrateFrames(join(directory,'missing'),join(directory,'new')),/No legacy pane directory/);
+});
+test('text migration leaves tmux API and ordinary panel terminology intact',()=>{
+  assert.equal(frameText('Pane panes PANE PANES paneTypes PHILBY_PANE panel Panel PANEL list-panes select-pane #{pane_title} TMUX_PANE'),'Frame frames FRAME FRAMES frameTypes PHILBY_FRAME panel Panel PANEL list-panes select-pane #{pane_title} TMUX_PANE');
+});
+test.after(()=>rmSync(directory,{recursive:true,force:true}));

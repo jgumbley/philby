@@ -33,7 +33,7 @@ tree-sitter resolution.
 
 ## Read-only terminal browser
 
-Run `make browse` from a Graphwiki pane, or from the Philby root:
+Run `make browse` from a Graphwiki frame, or from the Philby root:
 
 ```sh
 make -C shared wiki-browse GRAPH_ROOT=/absolute/path/to/wiki
@@ -45,7 +45,7 @@ the Wiki, Journal and Back tabs to change views. Markdown is displayed with its
 original syntax and highlighted links. HTTP(S) citations use terminal hyperlinks.
 Unresolved links show an explicit message. Code spans and fenced code do not
 create links. Only published pages and journals are read; drafts, receipts and
-pane conversations are excluded.
+frame conversations are excluded.
 
 Keyboard controls: `w` Wiki, `j` Journal, `b`/Backspace back, Tab select a link,
 Enter follow it, arrows and PageUp/PageDown scroll, `r` reload published content,
@@ -53,7 +53,7 @@ Enter follow it, arrows and PageUp/PageDown scroll, `r` reload published content
 while loading; an open browser does not block subsequent publication. There is
 no HTTP server, service installation or background viewer lifecycle.
 
-The Graphwiki pane scope keeps sourcing and attribution only in dated journals.
+The Graphwiki frame scope keeps sourcing and attribution only in dated journals.
 Articles explain concepts and their uncertainty; journal entries link to the
 articles they inform. These conventions do not impose citation requirements on
 the shared engine.

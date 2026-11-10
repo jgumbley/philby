@@ -8,7 +8,7 @@ make -C shared ocr INPUT=/absolute/path/document.pdf
 make -C shared ocr INPUT=/absolute/path/screenshot.png OUTPUT=/absolute/path/new-text.txt
 ```
 
-Run these commands from the repository root. From a pane, use `make -C "$PHILBY_ROOT/shared"` with the same target and arguments. Use absolute paths with `make -C`. Supported input extensions are `.pdf`, `.png`, `.jpg` and `.jpeg`; the input must be one complete local file. English is the only configured recognition language.
+Run these commands from the repository root. From a frame, use `make -C "$PHILBY_ROOT/shared"` with the same target and arguments. Use absolute paths with `make -C`. Supported input extensions are `.pdf`, `.png`, `.jpg` and `.jpeg`; the input must be one complete local file. English is the only configured recognition language.
 
 Without `OUTPUT`, `ocr` writes plain text to stdout. With `OUTPUT`, it creates that text file exclusively and fails if the destination already exists. Text keeps repeated lines and blank pages. Pages are separated by a newline, a form-feed character and another newline (`\n\f\n`). Progress and errors go to stderr. Failures, including a document with no extracted text, return nonzero.
 
@@ -16,7 +16,7 @@ PDF import extracts existing native text. Recognition uses Scribe's `autoShallow
 
 Capture a screenshot or finish downloading/exporting a PDF before invoking OCR. Existing `browser-run` can perform the application-specific browser operation; OCR reads the resulting local file. It does not manage browser downloads.
 
-Each invocation runs one process with two OCR workers and releases Scribe resources when it finishes or fails. Model decompression uses a disposable scratch directory that is cleaned up, leaving no model cache in the caller's directory. There is no daemon, service pane, socket or configured execution deadline.
+Each invocation runs one process with two OCR workers and releases Scribe resources when it finishes or fails. Model decompression uses a disposable scratch directory that is cleaned up, leaving no model cache in the caller's directory. There is no daemon, service frame, socket or configured execution deadline.
 
 `ocr-diagnose` reports platform/runtime information and checks the Scribe/native-canvas dependency and local English assets without opening a document. It is a dependency diagnostic, not service status.
 

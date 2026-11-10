@@ -8,7 +8,7 @@
 - No fallbacks — they hide failures; let issues surface immediately.
 
 This directory is Philby-owned Rust source for shared graph operations and their
-build. Each wiki pane owns its research content and authoring conventions.
+build. Each wiki frame owns its research content and authoring conventions.
 
 Leave changes uncommitted unless the user explicitly requests a commit.
 

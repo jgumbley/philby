@@ -6,23 +6,23 @@ import { join } from 'node:path';
 
 const directory=mkdtempSync(join(tmpdir(),'philby-recipes-'));
 process.env.PHILBY_ROOT=directory;
-process.env.PHILBY_PANES_DIR=join(directory,'tools');
-cpSync(new URL('../../pane-types/plain',import.meta.url),join(directory,'pane-types','plain'),{recursive:true});
-const recipe=join(directory,'pane-types','fixture');
+process.env.PHILBY_FRAMES_DIR=join(directory,'tools');
+cpSync(new URL('../../frame-types/plain',import.meta.url),join(directory,'frame-types','plain'),{recursive:true});
+const recipe=join(directory,'frame-types','fixture');
 mkdirSync(recipe,{recursive:true});
 writeFileSync(join(recipe,'SCOPE.md'),'Fixture responsibility');
 writeFileSync(join(recipe,'Makefile'),'help:\n\t@echo fixture\n');
 mkdirSync(join(recipe,'artifacts'));
-const {Store,envelope,paths,prepare,paneTypes,configured}=await import('../src/store.js');
+const {Store,envelope,paths,prepare,frameTypes,configured}=await import('../src/store.js');
 
-test('unknown recipes do not create a pane',()=>{
-  assert.deepEqual(paneTypes(),['plain','fixture']);
-  assert.throws(()=>prepare('invalid','unknown'),/Unknown pane type/);
+test('unknown recipes do not create a frame',()=>{
+  assert.deepEqual(frameTypes(),['plain','fixture']);
+  assert.throws(()=>prepare('invalid','unknown'),/Unknown frame type/);
   assert.equal(existsSync(paths('invalid').state),false);
   assert.equal(existsSync(paths('invalid').tools),false);
 });
 
-test('a queued mailbox does not choose the receiving pane type',()=>{
+test('a queued mailbox does not choose the receiving frame type',()=>{
   const mailbox=new Store('waiting');
   const message=envelope('source','waiting','retained material',{id:'before-creation'});
   try {
@@ -30,11 +30,11 @@ test('a queued mailbox does not choose the receiving pane type',()=>{
     const waiting=paths('waiting');
     assert.equal(waiting.state,join(waiting.tools,'.state'));
     assert.ok(existsSync(join(waiting.state,'app.sqlite')));
-    for(const file of ['SCOPE.md','Makefile','.pane-type'])assert.equal(existsSync(join(waiting.tools,file)),false);
+    for(const file of ['SCOPE.md','Makefile','.frame-type'])assert.equal(existsSync(join(waiting.tools,file)),false);
     assert.equal(configured('waiting'),false);
     const p=prepare('waiting','fixture');
     assert.equal(configured('waiting'),true);
-    assert.equal(readFileSync(join(p.tools,'.pane-type'),'utf8'),'fixture\n');
+    assert.equal(readFileSync(join(p.tools,'.frame-type'),'utf8'),'fixture\n');
     assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Fixture responsibility');
     assert.ok(existsSync(join(p.tools,'artifacts')));
     assert.deepEqual(mailbox.pending(),[message]);
@@ -50,8 +50,8 @@ test('a queued mailbox does not choose the receiving pane type',()=>{
   } finally {mailbox.close();}
 });
 
-test('failed scaffolding leaves no partial pane tools and can be retried',()=>{
-  const broken=join(directory,'pane-types','broken');
+test('failed scaffolding leaves no partial frame tools and can be retried',()=>{
+  const broken=join(directory,'frame-types','broken');
   mkdirSync(broken);writeFileSync(join(broken,'SCOPE.md'),'incomplete');
   assert.throws(()=>prepare('incomplete','broken'),/ENOENT/);
   assert.equal(existsSync(paths('incomplete').tools),false);
@@ -65,7 +65,7 @@ test('failed scaffolding leaves no partial pane tools and can be retried',()=>{
   assert.equal(existsSync(join(p.tools,'Makefile')),false);
 });
 
-test('legacy pane scope requires explicit migration and preserves edited tools',()=>{
+test('legacy frame scope requires explicit migration and preserves edited tools',()=>{
   const p=paths('legacy');mkdirSync(p.tools,{recursive:true});
   writeFileSync(join(p.tools,'AGENTS.md'),'Existing instructions');
   writeFileSync(join(p.tools,'Makefile'),'help:\n\t@echo existing\n');
@@ -75,7 +75,7 @@ test('legacy pane scope requires explicit migration and preserves edited tools',
   prepare('legacy');prepare('legacy','plain');
   assert.throws(()=>prepare('legacy','fixture'),/already exists with type plain/);
   assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Existing instructions');
-  assert.equal(existsSync(join(p.tools,'.pane-type')),false);
+  assert.equal(existsSync(join(p.tools,'.frame-type')),false);
 });
 
 test.after(()=>rmSync(directory,{recursive:true,force:true}));

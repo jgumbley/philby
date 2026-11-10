@@ -31,7 +31,7 @@ printf '%s\n' 'pptx.addSlide().addText("Hello", { x: 1, y: 1, w: 8, h: 1 });' \
 
 `OUTPUT` is mandatory and must name a new `.pptx` file in an existing directory. Existing files and symlinks are rejected; there is no overwrite option. Successful generation writes one JSON object to stdout: `{"output":"/absolute/path/deck-v1.pptx"}`. During generation, script output and library diagnostics go to stderr. Errors go to stderr and missing input, invalid JavaScript, failed generation and failed writes exit nonzero.
 
-Paths retain the invoking process's working directory. The location of `PROMPT_FILE` does not change relative image, input or output paths. `make -C shared` makes `shared` the working directory, so use absolute paths there. From a pane, preserve its directory with:
+Paths retain the invoking process's working directory. The location of `PROMPT_FILE` does not change relative image, input or output paths. `make -C shared` makes `shared` the working directory, so use absolute paths there. From a frame, preserve its directory with:
 
 ```sh
 make -f "$PHILBY_ROOT/shared/Makefile" slides-generate \
@@ -42,7 +42,7 @@ The source is a function body, not an ES module: static `import` and `export` de
 
 ## Branding and iteration
 
-Keep brand colours, fonts, layout helpers, assets and deck source in the pane that owns the work. The tool supplies no brand or content schema. PptxGenJS's default layout is 10 × 5.625 inches; choose another layout explicitly in your source when needed.
+Keep brand colours, fonts, layout helpers, assets and deck source in the frame that owns the work. The tool supplies no brand or content schema. PptxGenJS's default layout is 10 × 5.625 inches; choose another layout explicitly in your source when needed.
 
 [examples/branded.js](examples/branded.js) demonstrates two slides sharing a master, colours, fonts and a layout helper without external assets. From the repository root:
 

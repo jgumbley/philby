@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
@@ -10,11 +10,11 @@ import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 import { createRegistry, Harness, InboxDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 const directory=mkdtempSync(join(tmpdir(),'philby-test-'));
-process.env.PHILBY_ROOT=directory;process.env.PHILBY_PANES_DIR=join(directory,'panes');
-writeFileSync(join(directory,'PANE.md'),'shared-pane-guidance');
-cpSync(new URL('../../pane-types',import.meta.url),join(directory,'pane-types'),{recursive:true});
+process.env.PHILBY_ROOT=directory;process.env.PHILBY_FRAMES_DIR=join(directory,'frames');
+writeFileSync(join(directory,'FRAME.md'),'shared-frame-guidance');
+cpSync(new URL('../../frame-types',import.meta.url),join(directory,'frame-types'),{recursive:true});
 mkdirSync(join(directory,'shared'));writeFileSync(join(directory,'shared','Makefile'),'help:\n\t@echo shared-tool\n');
-const {Pane,Memory,ctx}=await import('../src/pane.js');
+const {Frame,Memory,ctx}=await import('../src/frame.js');
 const {envelope,Store,paths,prepare}=await import('../src/store.js');
 const {request}=await import('../src/ipc.js');
 const model={provider:'test',modelId:'test'};
@@ -26,7 +26,7 @@ async function until(fn:()=>Promise<boolean>|boolean) {for(let i=0;i<200;i++){if
 test('model picker retains a current model outside its presets',async()=>{
   const current={provider:'custom',modelId:'outside-picker'};
   const models=createModels();models.setProvider(fauxProvider({provider:current.provider,models:[{id:current.modelId}]}).provider);
-  const p=await Pane.open('model-custom',models,current);
+  const p=await Frame.open('model-custom',models,current);
   try {
     const selection=await request('model-custom',{op:'model'});
     assert.deepEqual(selection.current,current);
@@ -36,28 +36,28 @@ test('model picker retains a current model outside its presets',async()=>{
 });
 test('a missing saved provider fails without replacing the conversation or retaining its lock',async()=>{
   const configured=fixture();
-  const p=await Pane.open('missing-provider',configured.models,model);
+  const p=await Frame.open('missing-provider',configured.models,model);
   const id=p.conversation.id;
   await p.operation({op:'memory',field:'notes',content:'Keep the saved provider selection'});
   await p.close();
   const empty=createModels();
-  await assert.rejects(Pane.open('missing-provider',empty,{provider:'replacement',modelId:'other'}),/Saved model unavailable: test\/test/);
-  const reopened=await Pane.open('missing-provider',configured.models,model);
+  await assert.rejects(Frame.open('missing-provider',empty,{provider:'replacement',modelId:'other'}),/Saved model unavailable: test\/test/);
+  const reopened=await Frame.open('missing-provider',configured.models,model);
   try {
     assert.equal(reopened.conversation.id,id);
     assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
     assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Keep the saved provider selection');
   }finally{await reopened.close();}
 });
-test('reopening uses the saved model and history without evaluating the new-pane default',async()=>{
+test('reopening uses the saved model and history without evaluating the new-frame default',async()=>{
   const configured=fixture();
-  const p=await Pane.open('lazy-default',configured.models,model);
+  const p=await Frame.open('lazy-default',configured.models,model);
   const id=p.conversation.id;
   await p.operation({op:'memory',field:'notes',content:'Keep this memory'});
   assert.equal((await (await p.conversation.submit({type:'input',content:'Keep this conversation'},ctx)).wait(ctx)).status,'done');
   const history=(await p.conversation.context(ctx)).messages;
   await p.close();
-  const reopened=await Pane.open('lazy-default',configured.models,()=>{throw Error('default must not be read');});
+  const reopened=await Frame.open('lazy-default',configured.models,()=>{throw Error('default must not be read');});
   try {
     assert.equal(reopened.conversation.id,id);
     assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
@@ -65,13 +65,13 @@ test('reopening uses the saved model and history without evaluating the new-pane
     assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Keep this memory');
   }finally{await reopened.close();}
 });
-test('an unavailable new-pane default leaves no saved root conversation',async()=>{
+test('an unavailable new-frame default leaves no saved root conversation',async()=>{
   const configured=fixture();
-  await assert.rejects(Pane.open('invalid-default',configured.models,()=>({provider:'missing',modelId:'unavailable'})),/Model unavailable: missing\/unavailable/);
+  await assert.rejects(Frame.open('invalid-default',configured.models,()=>({provider:'missing',modelId:'unavailable'})),/Model unavailable: missing\/unavailable/);
   const harness=await Harness.open(await openNodeSqliteStorage(join(paths('invalid-default').state,'durable.sqlite')),{models:configured.models,registry:createRegistry()},ctx);
   try {assert.equal(await harness.conversation(ROOT_CONVERSATION_ID,ctx),undefined);}
   finally{await harness.close(ctx);}
-  const reopened=await Pane.open('invalid-default',configured.models,()=>model);
+  const reopened=await Frame.open('invalid-default',configured.models,()=>model);
   try {assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);}
   finally{await reopened.close();}
 });
@@ -86,8 +86,8 @@ test('provider switching preserves running tools, queued input, memory and the s
   const second=fauxProvider({provider:alternate.provider,models:[{id:alternate.modelId}],tokensPerSecond:10000});
   second.setResponses([fauxAssistantMessage('switched answer'),fauxAssistantMessage('queued answer'),fauxAssistantMessage('reopened answer')]);
   models.setProvider(second.provider);
-  const p=await Pane.open('model-switch',models,model);
-  const other=await Pane.open('model-other',fixture().models,model);
+  const p=await Frame.open('model-switch',models,model);
+  const other=await Frame.open('model-other',fixture().models,model);
   try {
     const conversationId=p.conversation.id;
     await p.operation({op:'memory',field:'notes',content:'preserved model memory'});
@@ -117,7 +117,7 @@ test('provider switching preserves running tools, queued input, memory and the s
     assert.deepEqual(history.filter(m=>m.role==='assistant').map(m=>m.provider),['test','second','second']);
     assert.equal(readFileSync(effect,'utf8'),'once\n');
     await p.close();
-    const reopened=await Pane.open('model-switch',models,model);
+    const reopened=await Frame.open('model-switch',models,model);
     try {
       assert.equal(reopened.conversation.id,conversationId);
       assert.deepEqual((await request('model-switch',{op:'model'})).current,alternate);
@@ -139,14 +139,14 @@ test('native model thinking preferences apply on selection and preserve explicit
   const provider=fauxProvider({provider:selected.provider,models:[{id:selected.modelId,reasoning:true},{id:other.modelId,reasoning:true}]});
   const models=createModels();models.setProvider(provider.provider);
   writeFileSync(settingsFile,JSON.stringify({modelThinkingLevels:{[`${selected.provider}/${selected.modelId}`]:'medium'}}));
-  let p:Awaited<ReturnType<typeof Pane.open>>|undefined;
+  let p:Awaited<ReturnType<typeof Frame.open>>|undefined;
   try {
-    p=await Pane.open('thinking-preferences',models,selected);
+    p=await Frame.open('thinking-preferences',models,selected);
     const id=p.conversation.id;
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
     await p.conversation.configure({thinkingLevel:'high'},ctx);
     await p.close();p=undefined;
-    p=await Pane.open('thinking-preferences',models,other);
+    p=await Frame.open('thinking-preferences',models,other);
     assert.equal(p.conversation.id,id);
     assert.deepEqual((await p.conversation.agent(ctx)).model,selected);
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
@@ -156,7 +156,7 @@ test('native model thinking preferences apply on selection and preserve explicit
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
     await p.conversation.configure({thinkingLevel:null},ctx);
     await p.close();p=undefined;
-    p=await Pane.open('thinking-preferences',models,other);
+    p=await Frame.open('thinking-preferences',models,other);
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'medium');
     assert.equal(provider.state.callCount,0);
   }finally{
@@ -164,7 +164,7 @@ test('native model thinking preferences apply on selection and preserve explicit
     if(previous===undefined)rmSync(settingsFile,{force:true});else writeFileSync(settingsFile,previous);
   }
 });
-test('compaction profiles follow model switches and reload when a pane reopens',async()=>{
+test('compaction profiles follow model switches and reload when a frame reopens',async()=>{
   const settingsDir=join(directory,'.pi','agent'),settingsFile=join(settingsDir,'settings.json');
   mkdirSync(settingsDir,{recursive:true});
   const previous=existsSync(settingsFile)?readFileSync(settingsFile,'utf8'):undefined;
@@ -179,16 +179,16 @@ test('compaction profiles follow model switches and reload when a pane reopens',
   const second=fauxProvider({provider:alternate.provider,models:[{id:alternate.modelId,contextWindow:32768,maxTokens:4000}],tokensPerSecond:10000});
   second.setResponses([fauxAssistantMessage('summary of older history'),fauxAssistantMessage('switched answer'),fauxAssistantMessage('next answer'),fauxAssistantMessage('reopened answer')]);
   const models=createModels();models.setProvider(first.provider);models.setProvider(second.provider);
-  let p:Awaited<ReturnType<typeof Pane.open>>|undefined;
-  const seed=async(pane:Awaited<ReturnType<typeof Pane.open>>)=>{
-    for(let n=0;n<3;n++)await pane.conversation.submit({type:'write',entry:{kind:'fixture',model:[{role:'user',content:`history ${n}: ${'x'.repeat(24000)}`,timestamp:Date.now()}]}},ctx);
+  let p:Awaited<ReturnType<typeof Frame.open>>|undefined;
+  const seed=async(frame:Awaited<ReturnType<typeof Frame.open>>)=>{
+    for(let n=0;n<3;n++)await frame.conversation.submit({type:'write',entry:{kind:'fixture',model:[{role:'user',content:`history ${n}: ${'x'.repeat(24000)}`,timestamp:Date.now()}]}},ctx);
   };
-  const submit=async(pane:Awaited<ReturnType<typeof Pane.open>>,content:string)=>{
-    assert.equal((await (await pane.conversation.submit({type:'input',content},ctx)).wait(ctx)).status,'done');
-    await pane.conversation.waitForIdle(ctx);
+  const submit=async(frame:Awaited<ReturnType<typeof Frame.open>>,content:string)=>{
+    assert.equal((await (await frame.conversation.submit({type:'input',content},ctx)).wait(ctx)).status,'done');
+    await frame.conversation.waitForIdle(ctx);
   };
   try {
-    p=await Pane.open('compaction-profile',models,model);
+    p=await Frame.open('compaction-profile',models,model);
     const id=p.conversation.id;
     await seed(p);
     await submit(p,'continue');
@@ -204,7 +204,7 @@ test('compaction profiles follow model switches and reload when a pane reopens',
     assert.deepEqual((await p.conversation.context(ctx)).head,head);
     await p.close();p=undefined;
     writeFileSync(settingsFile,JSON.stringify({compaction:{...profiles.compaction,enabled:false}}));
-    p=await Pane.open('compaction-profile',models,model);
+    p=await Frame.open('compaction-profile',models,model);
     assert.equal(p.conversation.id,id);
     assert.deepEqual((await p.conversation.agent(ctx)).model,alternate);
     await seed(p);
@@ -219,10 +219,10 @@ test('compaction profiles follow model switches and reload when a pane reopens',
 test('Makefile sources reach the first provider request and refresh after tools without reopening',async()=>{
   const dirs=prepare('live-tools');
   assert.equal(readFileSync(join(dirs.tools,'SCOPE.md'),'utf8'),'');
-  const files={shared:join(directory,'shared','Makefile'),pane:join(dirs.tools,'Makefile')};
+  const files={shared:join(directory,'shared','Makefile'),frame:join(dirs.tools,'Makefile')};
   const originalShared=readFileSync(files.shared,'utf8');
-  const initial={shared:'help:\n\t@echo shared\nhidden-target:\n\t@printf "%s\\n" "$(value INPUT)"\n',pane:readFileSync(files.pane,'utf8')};
-  const updated={shared:'help:\n\t@echo shared\nnew-shared-target:\n\t@echo shared-ready\n',pane:'help:\n\t@echo pane\nnew-pane-target:\n\t@echo pane-ready\n'};
+  const initial={shared:'help:\n\t@echo shared\nhidden-target:\n\t@printf "%s\\n" "$(value INPUT)"\n',frame:readFileSync(files.frame,'utf8')};
+  const updated={shared:'help:\n\t@echo shared\nnew-shared-target:\n\t@echo shared-ready\n',frame:'help:\n\t@echo frame\nnew-frame-target:\n\t@echo frame-ready\n'};
   const providerModel=openrouterProvider().getModels().find(candidate=>candidate.id==='z-ai/glm-5.3');
   assert.ok(providerModel && hasApi(providerModel,'openai-completions'));
   const serialized=async(context:TranscriptContext)=>{
@@ -239,7 +239,7 @@ test('Makefile sources reach the first provider request and refresh after tools 
     return payload.messages[0].content as string;
   };
   const verify=(system:string,sources:typeof initial)=>{
-    for(const name of ['shared','pane'] as const)assert.ok(system.includes(`Source: ${files[name]}\n\n${sources[name]}`));
+    for(const name of ['shared','frame'] as const)assert.ok(system.includes(`Source: ${files[name]}\n\n${sources[name]}`));
   };
   const f=fixture([
     async context=>{
@@ -248,7 +248,7 @@ test('Makefile sources reach the first provider request and refresh after tools 
     },
     async context=>{
       const system=await serialized(context);verify(system,updated);
-      for(const name of ['shared','pane'] as const)assert.ok(!system.includes(`Source: ${files[name]}\n\n${initial[name]}`));
+      for(const name of ['shared','frame'] as const)assert.ok(!system.includes(`Source: ${files[name]}\n\n${initial[name]}`));
       return fauxAssistantMessage('updated sources verified');
     },
     async context=>{
@@ -256,19 +256,19 @@ test('Makefile sources reach the first provider request and refresh after tools 
       assert.ok(system.includes(`Source: ${files.shared}\n\nERROR reading Makefile:`));
       assert.match(system,/ENOENT/);
       assert.ok(!system.includes(updated.shared));
-      assert.ok(system.includes(`Source: ${files.pane}\n\n${updated.pane}`));
+      assert.ok(system.includes(`Source: ${files.frame}\n\n${updated.frame}`));
       return fauxAssistantMessage('missing source reported');
     }
   ]);
   writeFileSync(files.shared,initial.shared);
-  const p=await Pane.open('live-tools',f.models,model),errors:unknown[]=[];
+  const p=await Frame.open('live-tools',f.models,model),errors:unknown[]=[];
   p.onError=error=>errors.push(error);
   try {
     assert.equal(f.faux.state.callCount,0);
     assert.equal((await (await p.conversation.submit({type:'input',content:'inspect and update tools'},ctx)).wait(ctx)).status,'done');
     assert.equal(f.faux.state.callCount,2);
     assert.deepEqual(await p.operation({op:'tools'}),updated);
-    for(const name of ['shared','pane'] as const)assert.equal(readFileSync(files[name],'utf8'),updated[name]);
+    for(const name of ['shared','frame'] as const)assert.equal(readFileSync(files[name],'utf8'),updated[name]);
     rmSync(files.shared);
     assert.equal((await (await p.conversation.submit({type:'input',content:'inspect tools again'},ctx)).wait(ctx)).status,'done');
     assert.equal(f.faux.state.callCount,3);
@@ -276,24 +276,24 @@ test('Makefile sources reach the first provider request and refresh after tools 
     await assert.rejects(p.operation({op:'tools'}),/ENOENT/);
   }finally{writeFileSync(files.shared,originalShared);await p.close();}
 });
-test('pane scope survives compaction and loads independently on reopening',async()=>{
+test('frame scope survives compaction and loads independently on reopening',async()=>{
   const a=prepare('instructions-a'),b=prepare('instructions-b');
   assert.equal(readFileSync(join(a.tools,'SCOPE.md'),'utf8'),'');
   writeFileSync(join(directory,'AGENTS.md'),'root-only-instructions');
   writeFileSync(join(a.tools,'SCOPE.md'),'alpha-only-instructions');
   writeFileSync(join(b.tools,'SCOPE.md'),'beta-only-instructions');
   prepare('instructions-a');assert.equal(readFileSync(join(a.tools,'SCOPE.md'),'utf8'),'alpha-only-instructions');
-  const verify=(tools:string,expected:string,excluded:string[],guidance='shared-pane-guidance')=>async(context:TranscriptContext)=>{
+  const verify=(tools:string,expected:string,excluded:string[],guidance='shared-frame-guidance')=>async(context:TranscriptContext)=>{
     const sections=Object.assign({},...context.messages.filter(m=>m.role==='system').map(m=>m.sections));
     const system=JSON.stringify(sections);
-    for(const [name,file] of [['shared',join(directory,'shared','Makefile')],['pane',join(tools,'Makefile')]])assert.ok(sections[`${name}-tools`].includes(`Source: ${file}\n\n${readFileSync(file,'utf8')}`));
+    for(const [name,file] of [['shared',join(directory,'shared','Makefile')],['frame',join(tools,'Makefile')]])assert.ok(sections[`${name}-tools`].includes(`Source: ${file}\n\n${readFileSync(file,'utf8')}`));
     assert.ok(system.includes(guidance));
     assert.ok(system.includes(expected));for(const text of excluded)assert.ok(!system.includes(text));
     return fauxAssistantMessage('instructions verified');
   };
-  const f=fixture([fauxAssistantMessage('older history summarized'),verify(a.tools,'alpha-only-instructions',['root-only-instructions','beta-only-instructions','changed-alpha-instructions']),verify(a.tools,'alpha-only-instructions',['changed-alpha-instructions','changed-shared-pane-guidance'])]);
-  const p=await Pane.open('instructions-a',f.models,model);
-  const q=await Pane.open('instructions-b',fixture([verify(b.tools,'beta-only-instructions',['root-only-instructions','alpha-only-instructions','changed-shared-pane-guidance'])]).models,model);
+  const f=fixture([fauxAssistantMessage('older history summarized'),verify(a.tools,'alpha-only-instructions',['root-only-instructions','beta-only-instructions','changed-alpha-instructions']),verify(a.tools,'alpha-only-instructions',['changed-alpha-instructions','changed-shared-frame-guidance'])]);
+  const p=await Frame.open('instructions-a',f.models,model);
+  const q=await Frame.open('instructions-b',fixture([verify(b.tools,'beta-only-instructions',['root-only-instructions','alpha-only-instructions','changed-shared-frame-guidance'])]).models,model);
   try {
     assert.equal(f.faux.state.callCount,0);
     await p.operation({op:'memory',field:'notes',content:'saved independently'});
@@ -303,35 +303,35 @@ test('pane scope survives compaction and loads independently on reopening',async
     assert.equal((await (await p.conversation.submit({type:'input',content:'after compaction'},ctx)).wait(ctx)).status,'done');
     assert.equal((await p.harness.snapshot(Memory,p.conversation.id,ctx))?.notes,'saved independently');
     writeFileSync(join(a.tools,'SCOPE.md'),'changed-alpha-instructions');
-    writeFileSync(join(directory,'PANE.md'),'changed-shared-pane-guidance');
+    writeFileSync(join(directory,'FRAME.md'),'changed-shared-frame-guidance');
     assert.equal((await (await p.conversation.submit({type:'input',content:'same process'},ctx)).wait(ctx)).status,'done');
-    assert.equal((await (await q.conversation.submit({type:'input',content:'other pane'},ctx)).wait(ctx)).status,'done');
+    assert.equal((await (await q.conversation.submit({type:'input',content:'other frame'},ctx)).wait(ctx)).status,'done');
     await p.close();
-    const reopened=await Pane.open('instructions-a',fixture([verify(a.tools,'changed-alpha-instructions',['alpha-only-instructions','beta-only-instructions'],'changed-shared-pane-guidance')]).models,model);
+    const reopened=await Frame.open('instructions-a',fixture([verify(a.tools,'changed-alpha-instructions',['alpha-only-instructions','beta-only-instructions'],'changed-shared-frame-guidance')]).models,model);
     try {assert.equal((await (await reopened.conversation.submit({type:'input',content:'reopened'},ctx)).wait(ctx)).status,'done');}finally{await reopened.close();}
-  }finally{await p.close();await q.close();writeFileSync(join(directory,'PANE.md'),'shared-pane-guidance');}
+  }finally{await p.close();await q.close();writeFileSync(join(directory,'FRAME.md'),'shared-frame-guidance');}
 });
 test('blank boot remains idle and unreadable instructions fail without retaining the lock',async()=>{
   const dirs=prepare('instructions-invalid');const file=join(dirs.tools,'SCOPE.md');
   rmSync(file);mkdirSync(file);
-  await assert.rejects(Pane.open('instructions-invalid',fixture().models,model),/EISDIR/);
+  await assert.rejects(Frame.open('instructions-invalid',fixture().models,model),/EISDIR/);
   rmSync(file,{recursive:true});writeFileSync(file,'');writeFileSync(join(dirs.tools,'BOOT.md'),' \n\t');
-  const f=fixture();const p=await Pane.open('instructions-invalid',f.models,model);
+  const f=fixture();const p=await Frame.open('instructions-invalid',f.models,model);
   try {await p.tick();assert.equal(f.faux.state.callCount,0);}finally{await p.close();}
 });
 test('startup queues behind saved user work and resumes its original durable task',async()=>{
   const f=fixture([fauxAssistantMessage('working '.repeat(100))],10);
-  const p=await Pane.open('startup',f.models,model);
+  const p=await Frame.open('startup',f.models,model);
   await p.operation({op:'input',content:'first user work'});await until(()=>f.faux.state.callCount===1);
   await p.operation({op:'input',content:'queued user work'});await p.close();
   const dirs=prepare('startup');writeFileSync(join(dirs.tools,'BOOT.md'),'restore configured workspace');
   writeFileSync(join(dirs.tools,'Makefile'),'close:\n\t@echo closed >> closed\n');
   const slow=fixture([fauxAssistantMessage('resuming '.repeat(100))],10);
-  const q=await Pane.open('startup',slow.models,model);
+  const q=await Frame.open('startup',slow.models,model);
   await until(async()=>(await q.harness.inspect(ctx)).submissions.some(s=>s.requestId?.startsWith('startup:')??false));
   const pending=(await q.harness.inspect(ctx)).tasks.filter(t=>t.record.kind==='philby.startup');assert.equal(pending.length,1);
   const startupId=pending[0].record.id;await q.close();
-  const r=await Pane.open('startup',fixture([fauxAssistantMessage('resumed'),fauxAssistantMessage('queued complete'),fauxAssistantMessage('startup complete')]).models,model);
+  const r=await Frame.open('startup',fixture([fauxAssistantMessage('resumed'),fauxAssistantMessage('queued complete'),fauxAssistantMessage('startup complete')]).models,model);
   try {
     await until(async()=>(await r.harness.getTask(startupId,ctx))?.state.status==='terminal');
     await r.conversation.waitForIdle(ctx);
@@ -346,21 +346,21 @@ test('startup queues behind saved user work and resumes its original durable tas
 test('close waits for teardown and exposes its failure while releasing resources',async()=>{
   const dirs=prepare('close-failure');writeFileSync(join(dirs.tools,'BOOT.md'),'restore');
   writeFileSync(join(dirs.tools,'Makefile'),'close:\n\t@echo teardown-failed >&2; echo closed >> closed; exit 7\n');
-  const p=await Pane.open('close-failure',fixture().models,model);
+  const p=await Frame.open('close-failure',fixture().models,model);
   await assert.rejects(request('close-failure',{op:'close'}),/teardown-failed/);
   assert.equal(readFileSync(join(dirs.tools,'closed'),'utf8'),'closed\n');
   await assert.rejects(p.close(),/teardown-failed/);
   assert.equal(readFileSync(join(dirs.tools,'closed'),'utf8'),'closed\n');
   writeFileSync(join(dirs.tools,'Makefile'),'close:\n\t@sleep .1; echo closed >> closed\n');
-  const q=await Pane.open('close-failure',fixture().models,model);
+  const q=await Frame.open('close-failure',fixture().models,model);
   try {assert.deepEqual(await request('close-failure',{op:'close'}),{closed:true});assert.equal(readFileSync(join(dirs.tools,'closed'),'utf8'),'closed\nclosed\n');}finally{await q.close();}
 });
 test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
   const a=fixture([async context=>{assert.ok(JSON.stringify(context).includes('remember-alpha'));return fauxAssistantMessage('alpha answer');}]);
   const b=fixture([fauxAssistantMessage('beta answer')]);
-  const alpha=await Pane.open('alpha',a.models,model);const beta=await Pane.open('beta',b.models,model);
+  const alpha=await Frame.open('alpha',a.models,model);const beta=await Frame.open('beta',b.models,model);
   try {
-    await assert.rejects(Pane.open('alpha',a.models,model),/already running/);
+    await assert.rejects(Frame.open('alpha',a.models,model),/already running/);
     await request('alpha',{op:'memory',field:'notes',content:'remember-alpha'});
     const sub=await alpha.conversation.submit({type:'input',content:'first'},ctx);await sub.wait(ctx);
     assert.equal((await beta.harness.snapshot(Memory,beta.conversation.id,ctx))?.notes,'');
@@ -372,18 +372,18 @@ test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
     assert.equal(existsSync(join(directory,'.philby')),false);
     await alpha.close();
     const result=await (await beta.conversation.submit({type:'input',content:'still here'},ctx)).wait(ctx);assert.equal(result.status,'done');
-    const revived=await Pane.open('alpha',fixture().models,model);
+    const revived=await Frame.open('alpha',fixture().models,model);
     try {assert.equal((await revived.harness.snapshot(Memory,revived.conversation.id,ctx))?.notes,'remember-alpha');assert.ok(JSON.stringify(await revived.operation({op:'capture'})).includes('alpha answer'));}finally{await revived.close();}
   } finally {await alpha.close();await beta.close();}
 });
-test('receiving pane mailbox survives closed panes without creating tools and deduplicates retries',async()=>{
-  const e=envelope('sender','receiving-pane','hello',{id:'stable-message'});
+test('receiving frame mailbox survives closed frames without creating tools and deduplicates retries',async()=>{
+  const e=envelope('sender','receiving-frame','hello',{id:'stable-message'});
   const mailbox=new Store(e.to);mailbox.accept(e);mailbox.close();
-  for(const file of ['SCOPE.md','Makefile','.pane-type'])assert.equal(existsSync(join(paths(e.to).tools,file)),false);
+  for(const file of ['SCOPE.md','Makefile','.frame-type'])assert.equal(existsSync(join(paths(e.to).tools,file)),false);
   assert.equal(paths(e.to).state,join(paths(e.to).tools,'.state'));
   assert.equal(existsSync(paths(e.from).state),false);
   assert.equal(existsSync(join(paths(e.to).state,'durable.sqlite')),false);
-  const receiving=await Pane.open(e.to,fixture([fauxAssistantMessage('received')]).models,model);
+  const receiving=await Frame.open(e.to,fixture([fauxAssistantMessage('received')]).models,model);
   try {
     await until(async()=>JSON.stringify(await receiving.operation({op:'capture'})).includes('received'));
     await receiving.operation({op:'receive',envelope:e});await receiving.tick();
@@ -391,17 +391,17 @@ test('receiving pane mailbox survives closed panes without creating tools and de
     assert.throws(()=>receiving.store.accept({...e,content:'conflict'}),/conflict/);
   } finally {await receiving.close();}
 });
-test('pane send persists directly in the receiving pane mailbox with its input mode',async()=>{
-  const sending=await Pane.open('sending-pane',fixture().models,model);
+test('frame send persists directly in the receiving frame mailbox with its input mode',async()=>{
+  const sending=await Frame.open('sending-frame',fixture().models,model);
   try {
     assert.deepEqual(await sending.operation({op:'send',to:'receiving-closed',content:'focus here',id:'steering',mode:'steer'}),{accepted:'steering'});
     const receiving=new Store('receiving-closed');
-    try {assert.deepEqual(receiving.pending(),[envelope('sending-pane','receiving-closed','focus here',{id:'steering',mode:'steer'})]);}
+    try {assert.deepEqual(receiving.pending(),[envelope('sending-frame','receiving-closed','focus here',{id:'steering',mode:'steer'})]);}
     finally {receiving.close();}
     assert.equal(sending.store.db.prepare("SELECT name FROM sqlite_master WHERE name='outbox'").get(),undefined);
   }finally{await sending.close();}
 });
-test('concurrent writers cannot accept conflicting content for one receiving pane request ID',{timeout:10000},async()=>{
+test('concurrent writers cannot accept conflicting content for one receiving frame request ID',{timeout:10000},async()=>{
   const moduleUrl=new URL('../src/store.js',import.meta.url).href;
   const children:ReturnType<typeof spawn>[]=[];
   let ready=0;
@@ -433,40 +433,40 @@ test('concurrent writers cannot accept conflicting content for one receiving pan
   }finally{for(const child of children)child.kill();}
 });
 test('updates are durable and passive',async()=>{
-  const f=fixture();const p=await Pane.open('updates',f.models,model);
+  const f=fixture();const p=await Frame.open('updates',f.models,model);
   const e=envelope('alpha','updates','decision needed',{kind:'update'});
   await p.operation({op:'receive',envelope:e});await p.tick();assert.equal(f.faux.state.callCount,0);await p.close();
-  const q=await Pane.open('updates',fixture().models,model);
+  const q=await Frame.open('updates',fixture().models,model);
   try {const updates=await q.operation({op:'updates',mark:true}) as any[];assert.equal(updates.length,1);assert.equal(updates[0].seen,false);assert.equal(q.store.updates()[0].seen,true);}finally{await q.close();}
 });
 test('close preserves queued work',async()=>{
   const f=fixture([fauxAssistantMessage('slow answer '.repeat(100)),fauxAssistantMessage('queued answer')],10);
-  const p=await Pane.open('queue',f.models,model);
+  const p=await Frame.open('queue',f.models,model);
   await p.operation({op:'input',id:'one',content:'first'});
   await until(()=>f.faux.state.callCount>0);
   await p.operation({op:'input',id:'two',content:'second'});
   await p.close();
-  const q=await Pane.open('queue',fixture([fauxAssistantMessage('resumed'),fauxAssistantMessage('follow up')]).models,model);
+  const q=await Frame.open('queue',fixture([fauxAssistantMessage('resumed'),fauxAssistantMessage('follow up')]).models,model);
   try {await q.conversation.waitForIdle(ctx);const text=JSON.stringify(await q.operation({op:'capture'}));assert.ok(text.includes('second'));}finally{await q.close();}
 });
 test('unsafe side effect interrupted by close is not repeated',async()=>{
   const file=join(directory,'effect');
   const f=fixture([fauxAssistantMessage([fauxToolCall('bash',{command:`echo once >> '${file}'; sleep 30`})],{stopReason:'toolUse'})]);
-  const p=await Pane.open('unsafe',f.models,model);
+  const p=await Frame.open('unsafe',f.models,model);
   await p.operation({op:'input',content:'do side effect'});
   await until(()=>{try{return readFileSync(file,'utf8').includes('once');}catch{return false;}});
   await p.close();
-  const q=await Pane.open('unsafe',fixture([fauxAssistantMessage('inspect interrupted call')]).models,model);
+  const q=await Frame.open('unsafe',fixture([fauxAssistantMessage('inspect interrupted call')]).models,model);
   try {await q.conversation.waitForIdle(ctx);assert.equal(readFileSync(file,'utf8'),'once\n');assert.match(JSON.stringify(await q.operation({op:'capture'})),/interrupt/i);}finally{await q.close();}
 });
-test('native tools use pane cwd and shared Make capabilities',async()=>{
+test('native tools use frame cwd and shared Make capabilities',async()=>{
   const f=fixture([fauxAssistantMessage([fauxToolCall('bash',{command:`pwd; make -C '${directory}/shared' help`})],{stopReason:'toolUse'}),fauxAssistantMessage('tools verified')]);
-  const p=await Pane.open('tools',f.models,model);
+  const p=await Frame.open('tools',f.models,model);
   try {await (await p.conversation.submit({type:'input',content:'tools'},ctx)).wait(ctx);const transcript=JSON.stringify(await p.operation({op:'capture'}));assert.ok(transcript.includes(paths('tools').tools));assert.ok(transcript.includes('shared-tool'));}finally{await p.close();}
 });
 test('stop preserves follow-ups without automatically restarting them',async()=>{
   const f=fixture([fauxAssistantMessage('slow '.repeat(100)),fauxAssistantMessage('next response'),fauxAssistantMessage('still available')],10);
-  const p=await Pane.open('stop',f.models,model);
+  const p=await Frame.open('stop',f.models,model);
   try {
     await p.operation({op:'input',content:'first'});await until(()=>f.faux.state.callCount===1);
     await p.operation({op:'input',content:'follow-up'});await p.operation({op:'stop'});
@@ -478,32 +478,32 @@ test('stop preserves follow-ups without automatically restarting them',async()=>
 });
 test('SIGKILL releases lifetime lock and unsafe tool intent recovers without replay',async()=>{
   const file=join(directory,'crash-effect');
-  const moduleUrl=new URL('../src/pane.js',import.meta.url).href;
+  const moduleUrl=new URL('../src/frame.js',import.meta.url).href;
   const script=`import {createModels,fauxProvider,fauxAssistantMessage,fauxToolCall} from '@earendil-works/pi-ai';
-    const {Pane}=await import(${JSON.stringify(moduleUrl)});
+    const {Frame}=await import(${JSON.stringify(moduleUrl)});
     const f=fauxProvider({provider:'test',models:[{id:'test'}]});
     f.setResponses([fauxAssistantMessage([fauxToolCall('bash',{command:${JSON.stringify(`echo once >> '${file}'; sleep 1`)}})],{stopReason:'toolUse'})]);
     const m=createModels();m.setProvider(f.provider);
-    const p=await Pane.open('crash',m,{provider:'test',modelId:'test'});
+    const p=await Frame.open('crash',m,{provider:'test',modelId:'test'});
     await p.operation({op:'input',content:'side effect'});`;
   const child=spawn(process.execPath,['--input-type=module','-e',script],{env:process.env,stdio:'ignore'});
   try {
     await until(()=>{try{return readFileSync(file,'utf8')==='once\n';}catch{return false;}});
     const exited=new Promise(r=>child.once('exit',r));child.kill('SIGKILL');await exited;
-    const p=await Pane.open('crash',fixture([fauxAssistantMessage('inspect before retry')]).models,model);
+    const p=await Frame.open('crash',fixture([fauxAssistantMessage('inspect before retry')]).models,model);
     try {await p.conversation.waitForIdle(ctx);assert.equal(readFileSync(file,'utf8'),'once\n');assert.match(JSON.stringify(await p.operation({op:'capture'})),/interrupt/i);}finally{await p.close();}
   }finally{child.kill('SIGKILL');}
 });
 
 
-test('delivery recovers after receiving pane Durable admission before marking its mailbox placed',async()=>{
+test('delivery recovers after receiving frame Durable admission before marking its mailbox placed',async()=>{
   const e=envelope('boundary-sender','boundary-receiving','exactly once',{id:'boundary'});
-  const p=await Pane.open(e.to,fixture([fauxAssistantMessage('partial '.repeat(100))],10).models,model);
+  const p=await Frame.open(e.to,fixture([fauxAssistantMessage('partial '.repeat(100))],10).models,model);
   p.store.accept(e);
   await p.conversation.submit({type:'input',content:`[From ${e.from}]\n${e.content}`,requestId:`message:${e.id}`,whenBusy:e.mode},ctx);
   assert.equal(p.store.pending().length,1);
   await p.close();
-  const q=await Pane.open(e.to,fixture([fauxAssistantMessage('recovered')]).models,model);
+  const q=await Frame.open(e.to,fixture([fauxAssistantMessage('recovered')]).models,model);
   try {
     await q.conversation.waitForIdle(ctx);
     assert.equal((await q.conversation.context(ctx)).messages.filter(m=>m.role==='user').length,1);
@@ -519,19 +519,19 @@ test('plan mode gates mutating tools to read-only until exited',async()=>{
       return fauxAssistantMessage([
         fauxToolCall('write',{path:target,content:'should not be written'}),
         fauxToolCall('bash',{command:`echo changed >> '${target}'`}),
-        fauxToolCall('bash',{command:`cat '${join(directory,'PANE.md')}'`}),
-        fauxToolCall('edit',{path:join(directory,'PANE.md'),edits:[{oldText:'shared',newText:'changed'}]})
+        fauxToolCall('bash',{command:`cat '${join(directory,'FRAME.md')}'`}),
+        fauxToolCall('edit',{path:join(directory,'FRAME.md'),edits:[{oldText:'shared',newText:'changed'}]})
       ],{stopReason:'toolUse'});
     },
     fauxAssistantMessage('plan presented')
   ]);
-  const p=await Pane.open('plan-mode',f.models,model);
+  const p=await Frame.open('plan-mode',f.models,model);
   try {
     await p.operation({op:'plan-set',active:true});
     assert.deepEqual(await p.operation({op:'plan'}),{active:true,plan:''});
     assert.equal((await (await p.conversation.submit({type:'input',content:'design a change'},ctx)).wait(ctx)).status,'done');
     assert.equal(existsSync(target),false);
-    assert.equal(readFileSync(join(directory,'PANE.md'),'utf8'),'shared-pane-guidance');
+    assert.equal(readFileSync(join(directory,'FRAME.md'),'utf8'),'shared-frame-guidance');
     await p.operation({op:'plan-set',active:false,plan:'1. do the thing'});
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'1. do the thing'});
   }finally{await p.close();}
@@ -545,18 +545,18 @@ test('plan mode blocks shell bypass attempts',async()=>{
       fauxToolCall('bash',{command:`sort -o '${target}' /dev/null`}),
       fauxToolCall('bash',{command:`find '${directory}' -name '*.tmp' -delete`}),
       fauxToolCall('bash',{command:`echo first\necho second > '${target}'`}),
-      fauxToolCall('read',{path:join(directory,'PANE.md')})
+      fauxToolCall('read',{path:join(directory,'FRAME.md')})
     ],{stopReason:'toolUse'}),
     async(context:TranscriptContext)=>{
       const last=context.messages.filter(m=>m.role==='toolResult').at(-1);
       assert.ok(last);
       assert.equal(last.isError,false);
       assert.equal(last.toolName,'read');
-      assert.ok(JSON.stringify(last.content).includes('shared-pane-guidance'));
+      assert.ok(JSON.stringify(last.content).includes('shared-frame-guidance'));
       return fauxAssistantMessage('done');
     }
   ]);
-  const p=await Pane.open('plan-bypass',f.models,model);
+  const p=await Frame.open('plan-bypass',f.models,model);
   try {
     await p.operation({op:'plan-set',active:true});
     assert.equal((await (await p.conversation.submit({type:'input',content:'try bypasses'},ctx)).wait(ctx)).status,'done');
@@ -573,7 +573,7 @@ test('plan mode rejects activation while work is active',async()=>{
     ],{stopReason:'toolUse'}),
     fauxAssistantMessage('work done')
   ]);
-  const p=await Pane.open('plan-busy',f.models,model);
+  const p=await Frame.open('plan-busy',f.models,model);
   try {
     const submission=await p.conversation.submit({type:'input',content:'slow work'},ctx);
     await until(()=>existsSync(effectFile));
@@ -588,7 +588,7 @@ test('plan mode rejects activation while work is active',async()=>{
 });
 test('plan mode initializes with explicit default state',async()=>{
   const f=fixture([fauxAssistantMessage('ok')]);
-  const p=await Pane.open('plan-init',f.models,model);
+  const p=await Frame.open('plan-init',f.models,model);
   try {
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
   }finally{await p.close();}
@@ -607,7 +607,7 @@ test('approved plan reaches model context after exit',async()=>{
       return fauxAssistantMessage('implementing now');
     }
   ]);
-  const p=await Pane.open('plan-context',f.models,model);
+  const p=await Frame.open('plan-context',f.models,model);
   try {
     await p.operation({op:'plan-set',active:true});
     await (await p.conversation.submit({type:'input',content:'plan something'},ctx)).wait(ctx);
@@ -615,21 +615,21 @@ test('approved plan reaches model context after exit',async()=>{
     await (await p.conversation.submit({type:'input',content:'go ahead'},ctx)).wait(ctx);
   }finally{await p.close();}
 });
-test('plan persists across pane reopen',async()=>{
+test('plan persists across frame reopen',async()=>{
   const f=fixture([fauxAssistantMessage('ok')]);
-  let p=await Pane.open('plan-persist',f.models,model);
+  let p=await Frame.open('plan-persist',f.models,model);
   try {
     await p.operation({op:'plan-set',active:false,plan:'saved plan text'});
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'saved plan text'});
   }finally{await p.close();}
-  p=await Pane.open('plan-persist',f.models,model);
+  p=await Frame.open('plan-persist',f.models,model);
   try {
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'saved plan text'});
   }finally{await p.close();}
 });
 test('exit without replacement preserves existing plan',async()=>{
   const f=fixture([fauxAssistantMessage('ok')]);
-  const p=await Pane.open('plan-preserve',f.models,model);
+  const p=await Frame.open('plan-preserve',f.models,model);
   try {
     await p.operation({op:'plan-set',active:false,plan:'original plan'});
     await p.operation({op:'plan-set',active:true});
@@ -648,7 +648,7 @@ test('new session starts fresh context while preserving memory and history',asyn
       return fauxAssistantMessage('second session answer');
     }
   ]);
-  const p=await Pane.open('new-session',f.models,model);
+  const p=await Frame.open('new-session',f.models,model);
   try {
     const conversationId=p.conversation.id;
     const file=join(paths('new-session').tools,'kept.txt');
@@ -682,7 +682,7 @@ test('new session rejects while work is active',async()=>{
     ],{stopReason:'toolUse'}),
     fauxAssistantMessage('work done')
   ]);
-  const p=await Pane.open('new-busy',f.models,model);
+  const p=await Frame.open('new-busy',f.models,model);
   try {
     const submission=await p.conversation.submit({type:'input',content:'slow work'},ctx);
     await until(()=>existsSync(effectFile));
@@ -693,18 +693,18 @@ test('new session rejects while work is active',async()=>{
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
   }finally{await p.close();}
 });
-test('new session persists across pane reopen',async()=>{
+test('new session persists across frame reopen',async()=>{
   const f=fixture([
     fauxAssistantMessage('old session'),
     fauxAssistantMessage('new session')
   ]);
-  let p=await Pane.open('new-persist',f.models,model);
+  let p=await Frame.open('new-persist',f.models,model);
   try {
     await (await p.conversation.submit({type:'input',content:'old question'},ctx)).wait(ctx);
     await p.operation({op:'new'});
     await (await p.conversation.submit({type:'input',content:'new question'},ctx)).wait(ctx);
   }finally{await p.close();}
-  p=await Pane.open('new-persist',f.models,model);
+  p=await Frame.open('new-persist',f.models,model);
   try {
     const context=await p.conversation.context(ctx);
     const texts=context.messages.map(m=>m.role==='user'||m.role==='assistant'?String(m.content):'').join(' ');
@@ -714,7 +714,7 @@ test('new session persists across pane reopen',async()=>{
 });
 test('new session preserves queued work, pending deliveries and request identities',async()=>{
   const f=fixture([fauxAssistantMessage('queued done'),fauxAssistantMessage('delivery done')]);
-  const p=await Pane.open('new-queued',f.models,model);
+  const p=await Frame.open('new-queued',f.models,model);
   try {
     await p.conversation.commit(async tx=>{
       const inbox=await tx.doc(InboxDoc,p.conversation.id);
@@ -742,11 +742,11 @@ test('new session preserves queued work, pending deliveries and request identiti
 });
 test('CLI plan-set validates ACTIVE and preserves plan on empty exit',async()=>{
   const f=fixture([fauxAssistantMessage('ok')]);
-  const p=await Pane.open('plan-cli',f.models,model);
+  const p=await Frame.open('plan-cli',f.models,model);
   try {
     await p.operation({op:'plan-set',active:false,plan:'saved plan'});
     const cliPath=new URL('../../dist/src/cli.js',import.meta.url).pathname;
-    const env={...process.env,PHILBY_PANE:'plan-cli'};
+    const env={...process.env,PHILBY_FRAME:'plan-cli'};
     const run=(args:string[],envVars:Record<string,string>,input?:string)=>new Promise<{code:number,stdout:string,stderr:string}>((resolve,reject)=>{
       const child=spawn('node',['--disable-warning=ExperimentalWarning',cliPath,...args],{env:{...env,...envVars},stdio:['pipe','pipe','pipe']});
       let stdout='',stderr='';
@@ -769,7 +769,7 @@ test('CLI plan-set validates ACTIVE and preserves plan on empty exit',async()=>{
 });
 test('plan-set preserves plan on empty exit via operation',async()=>{
   const f=fixture([fauxAssistantMessage('ok')]);
-  const p=await Pane.open('plan-preserve-op',f.models,model);
+  const p=await Frame.open('plan-preserve-op',f.models,model);
   try {
     await p.operation({op:'plan-set',active:false,plan:'saved plan'});
     const result=await p.operation({op:'plan-set',active:false});
@@ -777,3 +777,31 @@ test('plan-set preserves plan on empty exit via operation',async()=>{
   }finally{await p.close();}
 });
 test.after(()=>rmSync(directory,{recursive:true,force:true}));
+
+
+test('a migrated frame reopens its saved conversation, memory and queued mailbox',async()=>{
+  const {migrateFrames}=await import('../src/migration.js');
+  const config=fixture();
+  const original=await Frame.open('migration-resume',config.models,model);
+  const id=original.conversation.id;
+  await original.operation({op:'memory',field:'notes',content:'Retain migration memory'});
+  assert.equal((await (await original.conversation.submit({type:'input',content:'Retain migration history'},ctx)).wait(ctx)).status,'done');
+  const history=(await original.conversation.context(ctx)).messages;
+  await original.close();
+  const store=new Store('migration-resume');
+  const message=envelope('sender','migration-resume','Queued before migration',{id:'migration-queued'});
+  store.accept(message);store.close();
+  const tools=paths('migration-resume').tools;
+  renameSync(join(tools,'.frame-type'),join(tools,'.pane-type'));
+  renameSync(join(directory,'frames'),join(directory,'panes'));
+  migrateFrames(join(directory,'panes'),join(directory,'frames'));
+  const pending=new Store('migration-resume');
+  assert.deepEqual(pending.pending(),[message]);pending.close();
+  const reopened=await Frame.open('migration-resume',config.models,()=>{throw Error('must retain saved model');});
+  try {
+    assert.equal(reopened.conversation.id,id);
+    assert.deepEqual((await reopened.conversation.context(ctx)).messages.slice(0,history.length),history);
+    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'Retain migration memory');
+    assert.equal(readFileSync(join(tools,'.frame-type'),'utf8'),'plain\n');
+  } finally {await reopened.close();}
+});

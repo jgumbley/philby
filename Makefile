@@ -8,8 +8,9 @@ endif
 export PROMPT
 override PLAN := $(value PLAN)
 export PLAN
+export INPUT
 export PROMPT_FILE slug from REQUEST_ID MODE FIELD MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
-.PHONY: run pane pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-plan pane-plan-set pane-new-session pane-updates pane-tools window deps deps-update build check test check-all test-all help digest ingest quit cleanup ask reason twitter full-pi
+.PHONY: run frame-migrate frame frame-new frame-close frame-stop frame-send frame-report frame-capture frame-list frame-memory frame-plan frame-plan-set frame-new-session frame-updates frame-tools window deps deps-update build check test check-all test-all help digest ingest quit cleanup ask reason twitter full-pi
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -38,9 +39,11 @@ dist/.built: $(wildcard src/*.ts test/*.ts tmux/*.ts tmux/test/*.ts) tsconfig.js
 build: dist/.built
 run: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js open
-pane: run
-pane-new pane-close pane-stop pane-send pane-report pane-capture pane-list pane-memory pane-plan pane-plan-set pane-new-session pane-updates pane-tools: build
-	@node --disable-warning=ExperimentalWarning dist/src/cli.js $(@:pane-%=%)
+frame-migrate: build
+	@env -u PHILBY_PANES_DIR node --disable-warning=ExperimentalWarning dist/src/cli.js migrate
+frame: run
+frame-new frame-close frame-stop frame-send frame-report frame-capture frame-list frame-memory frame-plan frame-plan-set frame-new-session frame-updates frame-tools: build
+	@node --disable-warning=ExperimentalWarning dist/src/cli.js $(@:frame-%=%)
 window quit cleanup: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $@
 check: deps
@@ -69,21 +72,22 @@ ask reason twitter: build
 help:
 	@echo 'deps-update — refresh the npm lockfile for package.json, then install the locked dependencies'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
-	@echo 'make — create/open pane chooser; make pane slug=<slug> [TYPE=plain|graphwiki] — create or resume'
+	@echo 'make — create/open frame chooser; make frame slug=<slug> [TYPE=plain|graphwiki] — create or resume'
 	@echo 'Navigation: Ctrl-End / Ctrl-Home; macOS Kitty: Cmd-Option-Right / Cmd-Option-Left (requires allow_remote_control yes)'
-	@echo 'pane-new — select a saved pane or New pane; pane-list — saved agents and every live tmux view'
-	@echo 'pane-close pane-stop pane-send pane-capture pane-list pane-memory'
-	@echo 'pane-plan pane-plan-set pane-new-session pane-updates pane-tools pane-report'
-	@echo 'Messages and reports: slug=receiving-pane, from=sending-pane (or current pane), REQUEST_ID=, MODE=steer'
+	@echo 'frame-migrate [INPUT=old-directory] — rename panes/ to frames/ in place; PHILBY_FRAMES_DIR selects destination'
+	@echo 'frame-new — select a saved frame or New frame; frame-list — saved agents and every live tmux view'
+	@echo 'frame-close frame-stop frame-send frame-capture frame-list frame-memory'
+	@echo 'frame-plan frame-plan-set frame-new-session frame-updates frame-tools frame-report'
+	@echo 'Messages and reports: slug=receiving-frame, from=sending-frame (or current frame), REQUEST_ID=, MODE=steer'
 	@echo 'Inputs: FIELD=, MARK=1, ACTIVE=1, PLAN=...; TYPE selects a creation recipe'
 	@echo 'Prompts: PROMPT_FILE=path, prompt=..., or stdin.'
-	@echo 'Plan mode: pane-plan shows status; pane-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'
-	@echo 'New session: pane-new-session starts a fresh transcript, preserving files, tools, memory and archived history'
-	@echo 'pane-capture ALL=1 — include archived entries from before /new in chronological order'
+	@echo 'Plan mode: frame-plan shows status; frame-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'
+	@echo 'New session: frame-new-session starts a fresh transcript, preserving files, tools, memory and archived history'
+	@echo 'frame-capture ALL=1 — include archived entries from before /new in chronological order'
 	@echo 'window deps build check test digest ingest cleanup; shared: ask reason twitter'
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'
 	@echo 'digest — print existing Git-tracked files; ingest — copy that digest to the macOS or Linux clipboard'
-	@echo 'quit — close all Philby panes after y/n confirmation; /quit works inside any agent pane'
+	@echo 'quit — close all Philby frames after y/n confirmation; /quit works inside any agent frame'
 	@echo 'Browser tools: make -C shared help (browser-status, browser-tabs, browser-run; BROWSER=chrome|firefox)'
 	@echo 'OCR: make -C shared ocr INPUT=/path/document.pdf [OUTPUT=/path/new.txt]; ocr-diagnose'
 	@echo 'Slides: make -C shared slides-generate PROMPT_FILE=/path/deck.js OUTPUT=/path/new.pptx; slides-diagnose'

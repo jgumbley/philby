@@ -77,7 +77,7 @@ JS
    immediately with the busy caller and queued count.
 
 6. Check service ownership and lifetime in a disposable Philby workspace.
-   Detach and reattach; close an ordinary agent pane while idle. Confirm the
+   Detach and reattach; close an ordinary agent frame while idle. Confirm the
    browser service stays connected and no new Chrome approval is needed. A second
    workspace must fail to take ownership of the same browser while that
    service holds its lifetime lock. Closing the service pane or running
@@ -109,7 +109,7 @@ Results:
   Chrome live session: pending
   Firefox live session: pending
   Persistent connection and single Chrome approval: pending
-  Pane lifetime and cross-workspace ownership: pending
+  Service lifetime and cross-workspace ownership: pending
   Existing tabs and login state preserved: pending
   Failure and concurrency behavior: pending
 

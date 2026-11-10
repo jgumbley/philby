@@ -1,0 +1,83 @@
+[2026/11/01 18:16:07:2056] N: ttyd 1.7.7-40e79c7 (libwebsockets 4.3.3-unknown)
+[2026/11/01 18:16:07:2057] N: tty configuration:
+[2026/11/01 18:16:07:2057] N:   start command: node /home/system/wip/philby/shared/graphwiki/wiki.mjs browse
+[2026/11/01 18:16:07:2057] N:   close signal: SIGHUP (1)
+[2026/11/01 18:16:07:2057] N:   terminal type: xterm-256color
+[2026/11/01 18:16:07:2057] N: lws_create_context: LWS: 4.3.3-unknown, MbedTLS-2.28.5 NET SRV H1 H2 WS ConMon IPV6-off
+[2026/11/01 18:16:07:2084] N: elops_init_pt_uv:  Using foreign event loop...
+[2026/11/01 18:16:07:2084] N: __lws_lc_tag:  ++ [wsi|0|pipe] (1)
+[2026/11/01 18:16:07:2084] N: __lws_lc_tag:  ++ [vh|0|netlink] (1)
+[2026/11/01 18:16:07:2085] N: __lws_lc_tag:  ++ [vh|1|default|0.0.0.0|0.0.0.0|8080] (2)
+[2026/11/01 18:16:07:2086] N: [vh|1|default|0.0.0.0|0.0.0.0|8080]: lws_socket_bind: source ads 0.0.0.0
+[2026/11/01 18:16:07:2086] N: __lws_lc_tag:  ++ [wsi|1|listen|default|0.0.0.0|8080] (2)
+[2026/11/01 18:16:07:2086] N:  Listening on port: 8080
+[2026/11/01 18:16:07:3279] N: __lws_lc_tag:  ++ [wsisrv|0|adopted] (1)
+[2026/11/01 18:16:07:3302] N: HTTP / - 127.0.0.1
+[2026/11/01 18:16:07:3475] N: __lws_lc_untag:  -- [wsisrv|0|adopted] (0) 19.593ms
+[2026/11/01 18:16:07:4507] N: __lws_lc_tag:  ++ [wsisrv|1|adopted] (1)
+[2026/11/01 18:16:07:4528] N: HTTP / - 127.0.0.1
+[2026/11/01 18:16:07:4696] N: __lws_lc_untag:  -- [wsisrv|1|adopted] (0) 18.864ms
+[2026/11/01 18:16:24:8186] N: __lws_lc_tag:  ++ [wsisrv|2|adopted] (1)
+[2026/11/01 18:16:24:8210] N: HTTP / - 127.0.0.1
+[2026/11/01 18:16:24:8377] N: __lws_lc_untag:  -- [wsisrv|2|adopted] (0) 19.022ms
+[2026/11/01 18:16:24:9403] N: __lws_lc_tag:  ++ [wsisrv|3|adopted] (1)
+[2026/11/01 18:16:24:9424] N: HTTP / - 127.0.0.1
+[2026/11/01 18:16:24:9603] N: __lws_lc_untag:  -- [wsisrv|3|adopted] (0) 19.969ms
+[2026/11/01 18:16:32:9578] N: __lws_lc_tag:  ++ [wsisrv|4|adopted] (1)
+[2026/11/01 18:16:32:9599] N: HTTP /token - 127.0.0.1
+[2026/11/01 18:16:32:9672] N: __lws_lc_tag:  ++ [wsisrv|5|adopted] (2)
+[2026/11/01 18:16:32:9680] N: WS   /ws - 127.0.0.1, clients: 1
+[2026/11/01 18:16:32:9706] N: started process, pid: 49462
+[2026/11/01 18:16:34:1024] N: WS closed from 127.0.0.1, clients: 0
+[2026/11/01 18:16:34:1024] N: killing process, pid: 49462
+[2026/11/01 18:16:34:1024] N: __lws_lc_untag:  -- [wsisrv|5|adopted] (1) 1.135s
+[2026/11/01 18:16:34:1035] N: process killed with signal 1, pid: 49462
+[2026/11/01 18:16:34:1041] N: __lws_lc_untag:  -- [wsisrv|4|adopted] (0) 1.146s
+[2026/11/01 18:17:20:2769] N: __lws_lc_tag:  ++ [wsisrv|6|adopted] (1)
+[2026/11/01 18:17:20:2791] N: HTTP / - 127.0.0.1
+[2026/11/01 18:17:20:2971] N: __lws_lc_untag:  -- [wsisrv|6|adopted] (0) 20.203ms
+[2026/11/01 18:17:20:3992] N: __lws_lc_tag:  ++ [wsisrv|7|adopted] (1)
+[2026/11/01 18:17:20:4013] N: HTTP / - 127.0.0.1
+[2026/11/01 18:17:20:4189] N: __lws_lc_untag:  -- [wsisrv|7|adopted] (0) 19.676ms
+[2026/11/01 18:17:45:5179] N: __lws_lc_tag:  ++ [wsisrv|8|adopted] (1)
+[2026/11/01 18:17:45:5200] N: HTTP / - 127.0.0.1
+[2026/11/01 18:17:45:5367] N: __lws_lc_untag:  -- [wsisrv|8|adopted] (0) 18.757ms
+[2026/11/01 18:17:45:6088] N: __lws_lc_tag:  ++ [wsisrv|9|adopted] (1)
+[2026/11/01 18:17:45:6114] N: HTTP /token - 127.0.0.1
+[2026/11/01 18:17:45:6194] N: __lws_lc_tag:  ++ [wsisrv|a|adopted] (2)
+[2026/11/01 18:17:45:6200] N: WS   /ws - 127.0.0.1, clients: 1
+[2026/11/01 18:17:45:6229] N: started process, pid: 49737
+[2026/11/01 18:17:46:7408] N: WS closed from 127.0.0.1, clients: 0
+[2026/11/01 18:17:46:7408] N: killing process, pid: 49737
+[2026/11/01 18:17:46:7408] N: __lws_lc_untag:  -- [wsisrv|a|adopted] (1) 1.121s
+[2026/11/01 18:17:46:7429] N: process killed with signal 1, pid: 49737
+[2026/11/01 18:17:46:7430] N: __lws_lc_untag:  -- [wsisrv|9|adopted] (0) 1.134s
+[2026/11/01 20:51:05:9266] N: __lws_lc_tag:  ++ [wsisrv|b|adopted] (1)
+[2026/11/01 20:51:05:9326] N: HTTP / - 127.0.0.1
+[2026/11/01 20:51:06:0922] N: HTTP /token - 127.0.0.1
+[2026/11/01 20:51:06:1199] N: __lws_lc_tag:  ++ [wsisrv|c|adopted] (2)
+[2026/11/01 20:51:06:1201] N: WS   /ws - 127.0.0.1, clients: 1
+[2026/11/01 20:51:06:1259] N: started process, pid: 59685
+[2026/11/01 20:51:11:0924] N: __lws_lc_untag:  -- [wsisrv|b|adopted] (1) 5.165s
+[2026/11/01 21:45:45:8678] N: WS closed from 127.0.0.1, clients: 0
+[2026/11/01 21:45:45:8679] N: killing process, pid: 59685
+[2026/11/01 21:45:45:8680] N: __lws_lc_untag:  -- [wsisrv|c|adopted] (0) 54.662min
+[2026/11/01 21:45:45:8728] N: process killed with signal 1, pid: 59685
+[2026/11/01 21:45:45:8737] N: __lws_lc_tag:  ++ [wsisrv|d|adopted] (1)
+[2026/11/01 21:45:45:8755] N: HTTP / - 127.0.0.1
+[2026/11/01 21:45:45:9043] N: HTTP /token - 127.0.0.1
+[2026/11/01 21:45:46:0023] N: HTTP /token - 127.0.0.1
+[2026/11/01 21:45:46:0194] N: __lws_lc_tag:  ++ [wsisrv|e|adopted] (2)
+[2026/11/01 21:45:46:0196] N: WS   /ws - 127.0.0.1, clients: 1
+[2026/11/01 21:45:46:0211] N: started process, pid: 63265
+[2026/11/01 21:45:51:0034] N: __lws_lc_untag:  -- [wsisrv|d|adopted] (1) 5.129s
+[2026/11/01 22:04:04:4927] N: rops_handle_POLLIN_netlink: DELADDR
+[2026/11/01 22:04:04:4943] N: rops_handle_POLLIN_netlink: DELADDR
+[2026/11/02 08:26:24:6892] N: rops_handle_POLLIN_netlink: DELADDR
+[2026/11/02 08:26:24:6913] N: rops_handle_POLLIN_netlink: DELADDR
+[2026/11/05 13:56:57:1236] N: WS closed from 127.0.0.1, clients: 0
+[2026/11/05 13:56:57:1236] N: killing process, pid: 63265
+[2026/11/05 13:56:57:1273] N: __lws_lc_untag:  -- [wsisrv|e|adopted] (0) 19.748hr
+[2026/11/05 13:56:57:1275] N: process killed with signal 1, pid: 63265
+[2026/11/05 13:56:57:1983] N: received signal: SIGTERM (15), exiting...
+[2026/11/05 13:56:57:1984] N: send ^C to force exit.

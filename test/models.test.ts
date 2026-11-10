@@ -82,7 +82,7 @@ test('invalid native shortlist settings remain visible instead of silently hidin
   assert.ok((await modelChoices(runtime)).some(choice=>choice.provider==='test-local'));
 });
 
-test('saved selections do not require a new-pane default and explicit references retain their complete ID',async t=>{
+test('saved selections do not require a new-frame default and explicit references retain their complete ID',async t=>{
   const options=fixture(t);
   const unselected=await models(undefined,{...options,env:{DEFAULT_MODEL:'invalid-default'}});
   assert.equal(unselected.model,undefined);

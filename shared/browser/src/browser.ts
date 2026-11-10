@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 type Name = 'chrome' | 'firefox';
 type View = {name: Name; pane: string; pid: number; dead: boolean};
 type Runtime = {
-  root: string; panesRoot: string; runtimeDir: string;
+  root: string; framesRoot: string; runtimeDir: string;
   openBrowser(name: Name, command: string[], cwd: string): {pane: string; started: boolean};
   browserViews(): View[];
   browserSocket(name: Name): string;
@@ -372,12 +372,12 @@ async function main() {
   if (action === 'serve') { await serve(runtime, name, path); return; }
   const request: Request = {
     op: action, id: randomUUID(), source, tab: process.env.TAB, cwd: process.cwd(),
-    caller: process.env.PHILBY_PANE || 'shell', clientPid: process.pid, endpoint: process.env.BROWSER_ENDPOINT || undefined,
+    caller: process.env.PHILBY_FRAME || 'shell', clientPid: process.pid, endpoint: process.env.BROWSER_ENDPOINT || undefined,
   };
   let result: unknown;
   if (action === 'connect') {
     const env = [
-      `PHILBY_ROOT=${runtime.root}`, `PHILBY_PANES_DIR=${runtime.panesRoot}`, `TMPDIR=${tmpdir()}`,
+      `PHILBY_ROOT=${runtime.root}`, `PHILBY_FRAMES_DIR=${runtime.framesRoot}`, `TMPDIR=${tmpdir()}`,
       `BROWSER=${name}`, `BROWSER_ENDPOINT=${selectedEndpoint || ''}`,
       ...(process.env.PHILBY_TMUX_SOCKET ? [`PHILBY_TMUX_SOCKET=${process.env.PHILBY_TMUX_SOCKET}`] : []),
     ];

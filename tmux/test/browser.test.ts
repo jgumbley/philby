@@ -28,10 +28,10 @@ server.listen(path,()=>{
   if(mode==='block') while(true) {}
 });`;
 
-function workspace(panesRoot?:string) {
+function workspace(framesRoot?:string) {
   const directory=mkdtempSync(join(tmpdir(),'philby-browser-tmux-'));
   const server=`philby-browser-test-${process.pid}-${directory.split('-').at(-1)}`;
-  const env={...process.env,PHILBY_PANES_DIR:panesRoot || join(directory,'panes'),PHILBY_TMUX_SOCKET:server,PHILBY_DETACHED:'1'};
+  const env={...process.env,PHILBY_FRAMES_DIR:framesRoot || join(directory,'frames'),PHILBY_TMUX_SOCKET:server,PHILBY_DETACHED:'1'};
   const file=join(directory,'service.mjs');writeFileSync(file,fixture);
   const run=(program:string,args:string[])=>new Promise<string>((resolve,reject)=>{
     const child=spawn(program,args,{env,cwd:root,stdio:['ignore','pipe','pipe']});let out='',err='';
@@ -64,7 +64,7 @@ test('browser windows share one raw process, retain failures and disconnect duri
     const views=JSON.parse(await w.adapter('console.log(JSON.stringify(m.browserViews()))'));
     assert.equal(views.length,1);assert.equal(views[0].name,'chrome');assert.equal(views[0].dead,false);
     assert.deepEqual(JSON.parse(readFileSync(marker,'utf8')),{pid:views[0].pid,literal});
-    assert.equal(existsSync(w.env.PHILBY_PANES_DIR),false);
+    assert.equal(existsSync(w.env.PHILBY_FRAMES_DIR),false);
     assert.match(await w.adapter('process.stdout.write(m.listViews())'),/@browser-chrome/);
     const ordinary=(await w.tmux('new-window','-d','-P','-F','#{pane_id}','-t','philby:','-n','shell','sleep','60')).trim();
     await assert.rejects(w.adapter(`m.closeBrowserPane('chrome',${JSON.stringify(ordinary)},${views[0].pid})`),/not an owned chrome/);
@@ -80,7 +80,7 @@ test('browser windows share one raw process, retain failures and disconnect duri
     await w.cleanup();
     assert.equal(JSON.parse(readFileSync(marker,'utf8')).disconnected,true);
     assert.deepEqual(JSON.parse(await w.adapter('console.log(JSON.stringify(m.browserViews()))')),[]);
-    assert.equal(existsSync(w.env.PHILBY_PANES_DIR),false);
+    assert.equal(existsSync(w.env.PHILBY_FRAMES_DIR),false);
   } finally {w.dispose();}
 });
 
@@ -125,9 +125,9 @@ test('workspace cleanup interrupts a blocked browser owner after its disconnect 
   } finally {w.dispose();}
 });
 
-test('browser cleanup stays within its tmux server when servers share a pane directory',async()=>{
+test('browser cleanup stays within its tmux server when servers share a frame directory',async()=>{
   const first=workspace();
-  const second=workspace(first.env.PHILBY_PANES_DIR);
+  const second=workspace(first.env.PHILBY_FRAMES_DIR);
   try {
     const markers=[join(first.directory,'result.json'),join(second.directory,'result.json')];
     for(const [index,w] of [first,second].entries()) {

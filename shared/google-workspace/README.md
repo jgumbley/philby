@@ -1,6 +1,6 @@
 # Google Workspace
 
-Read Google Chat, Docs, Sheets, Slides and Drive from any Philby pane through `shared/Makefile`. The module wraps the current [gogcli](https://github.com/openclaw/gogcli) executable on `PATH`. It uses Node's standard library; no Python environment, vendored client, pinned client version or sibling checkout is required.
+Read Google Chat, Docs, Sheets, Slides and Drive from any Philby frame through `shared/Makefile`. The module wraps the current [gogcli](https://github.com/openclaw/gogcli) executable on `PATH`. It uses Node's standard library; no Python environment, vendored client, pinned client version or sibling checkout is required.
 
 ## Setup and authentication
 
@@ -70,7 +70,7 @@ make -C shared google-workspace-download GOOGLE_ACCOUNT=you@example.com \
 
 `download` and `export` require `OUTPUT`. `read`, `spaces` and `messages` print their result to stdout unless `OUTPUT` is supplied. New files are created with owner-only permissions, and existing files or symlinks are never overwritten. Parent directories must already exist. Diagnostics and errors stay separate from result data.
 
-Relative paths use Make's working directory. Use absolute paths with `make -C shared`, or preserve the pane directory with `make -f "$PHILBY_ROOT/shared/Makefile" google-workspace-read ...`.
+Relative paths use Make's working directory. Use absolute paths with `make -C shared`, or preserve the frame directory with `make -f "$PHILBY_ROOT/shared/Makefile" google-workspace-read ...`.
 
 All Google data commands use gog's read-only, noninteractive mode. The module does not expose arbitrary gog commands. Read-only authorization does not change Philby's replay rules for native tools. Downloads and authentication retain their usual side effects and must not be marked replay-safe.
 
@@ -83,4 +83,4 @@ make -C shared google-workspace-diagnose GOOGLE_ACCOUNT=you@example.com
 
 Automated tests use deterministic client fixtures and temporary output directories. They exercise the shared interface, parsing, limits, failure propagation and file handling without contacting Google or using real credentials. `make check-all test-all` includes this module.
 
-After installation or a gog upgrade, manually run the Make targets above against accessible sample Docs, Sheets, Slides, a Drive file and a Chat space. Confirm chronological Chat output, bounded text, saved-file contents and explicit failures for inaccessible inputs. Keep pane-specific research and JIRA workflows in their owning panes.
+After installation or a gog upgrade, manually run the Make targets above against accessible sample Docs, Sheets, Slides, a Drive file and a Chat space. Confirm chronological Chat output, bounded text, saved-file contents and explicit failures for inaccessible inputs. Keep frame-specific research and JIRA workflows in their owning frames.
