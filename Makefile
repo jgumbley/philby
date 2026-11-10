@@ -9,7 +9,7 @@ export PROMPT
 override PLAN := $(value PLAN)
 export PLAN
 export INPUT
-export PROMPT_FILE slug from REQUEST_ID MODE FIELD MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
+export PROMPT_FILE id from REQUEST_ID MODE FIELD MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
 export LEVEL
 ifneq ($(origin ENABLED),undefined)
 export ENABLED
@@ -81,19 +81,19 @@ full-pi:
 ask reason twitter: build
 	@$(MAKE) --no-print-directory -C shared $@
 help:
-	@echo 'config-check; frame-config-check slug=<slug> — validate Varlock schemas without printing values'
-	@echo 'frame-config-migrate slug=<slug> — write settings from an existing closed frame’s saved conversation'
-	@echo 'frame-thinking slug=<slug> LEVEL=off|minimal|low|medium|high|xhigh|max|default — save a frame thinking preference'
-	@echo 'frame-messaging slug=<slug> [ENABLED=true|false] — inspect messaging; change it while the frame is closed'
+	@echo 'config-check; frame-config-check id=<id> — validate Varlock schemas without printing values'
+	@echo 'frame-config-migrate id=<id> — write settings from an existing closed frame’s saved conversation'
+	@echo 'frame-thinking id=<id> LEVEL=off|minimal|low|medium|high|xhigh|max|default — save a frame thinking preference'
+	@echo 'frame-messaging id=<id> [ENABLED=true|false] — inspect messaging; change it while the frame is closed'
 	@echo 'deps-update — refresh the npm lockfile for package.json, then install the locked dependencies'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
-	@echo 'make — create/open frame chooser; make frame slug=<slug> [TYPE=plain|graphwiki] — create or resume'
+	@echo 'make — create/open frame chooser; make frame id=<id> [TYPE=plain|graphwiki] — create or resume'
 	@echo 'Navigation: Ctrl-End / Ctrl-Home; macOS Kitty: Cmd-Option-Right / Cmd-Option-Left (requires allow_remote_control yes)'
 	@echo 'frame-migrate [INPUT=old-directory] — rename panes/ to frames/ in place; PHILBY_FRAMES_DIR selects destination'
 	@echo 'frame-new — select a saved frame or New frame; frame-list — saved agents and every live tmux view'
 	@echo 'frame-close frame-stop frame-send frame-capture frame-list frame-memory'
 	@echo 'frame-plan frame-plan-set frame-new-session frame-updates frame-tools frame-report'
-	@echo 'Messages and reports: slug=receiving-frame, from=sending-frame (or current frame), REQUEST_ID=, MODE=steer'
+	@echo 'Messages and reports: id=receiving-frame, from=sending-frame (or current frame), REQUEST_ID=, MODE=steer'
 	@echo 'Inputs: FIELD=, MARK=1, ACTIVE=1, PLAN=...; TYPE selects a creation recipe'
 	@echo 'Prompts: PROMPT_FILE=path, prompt=..., or stdin.'
 	@echo 'Plan mode: frame-plan shows status; frame-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'

@@ -48,10 +48,14 @@ export function applyEnvironment(env:NodeJS.ProcessEnv) {
 }
 applyEnvironment(instanceEnvironment);
 
-export function frameEnvironment(directory:string,name:string,framesRoot:string) {
+export function frameEnvironment(directory:string,id:string,framesRoot:string) {
   const loaded=loadConfiguration([root,directory],invocationEnvironment);
   const localKeys=loaded.files.filter(file=>!instance.files.includes(file)).flatMap(file=>Object.keys(parseEnv(readFileSync(file,'utf8'))));
   const reserved=[...new Set(localKeys.filter(key=>key.startsWith('PHILBY_') || key==='PI_CODING_AGENT_DIR' || key==='FRAME_MODEL' || key==='FRAME_THINKING_LEVEL' || key==='FRAME_MESSAGING'))];
   if(reserved.length) throw Error(`Frame environment contains reserved keys: ${reserved.join(', ')}`);
-  return environment({...loaded.values,PHILBY_FRAME:name,PHILBY_FRAMES_DIR:framesRoot});
+  const values:NodeJS.ProcessEnv={...loaded.values,PHILBY_FRAME:id,PHILBY_FRAMES_DIR:framesRoot};
+  delete values.id;
+  const result=environment(values);
+  delete result.id;
+  return result;
 }

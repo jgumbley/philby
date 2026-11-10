@@ -31,15 +31,15 @@ function paneList(format:string) {
   return result.stdout;
 }
 const quote=(s:string)=>`'${s.replaceAll("'", "'\\''")}'`;
-function launch(action:string,name?:string) {
+function launch(action:string,id?:string) {
   if(!environmentFile) {
     const env:NodeJS.ProcessEnv={...invocationEnvironment,PHILBY_ROOT:root,PHILBY_FRAMES_DIR:framesRoot,PHILBY_TMUX_SOCKET:server(),PI_CODING_AGENT_DIR:piAgentDir};
-    for(const key of ['slug','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL','PHILBY_FRAME']) delete env[key];
+    for(const key of ['id','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL','PHILBY_FRAME']) delete env[key];
     mkdirSync(launchDirectory(),{recursive:true,mode:0o700});
     environmentFile=join(launchDirectory(),`${randomUUID()}.json`);
     writeFileSync(environmentFile,JSON.stringify(env),{flag:'wx',mode:0o600});
   }
-  return [process.execPath,'--disable-warning=ExperimentalWarning',launcher,environmentFile,action,...(name?[name]:[])].map(quote).join(' ');
+  return [process.execPath,'--disable-warning=ExperimentalWarning',launcher,environmentFile,action,...(id?[id]:[])].map(quote).join(' ');
 }
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 function openingLock() {
@@ -47,7 +47,7 @@ function openingLock() {
   const mutex=new DatabaseSync(join(runtimeDir,'open.sqlite'));mutex.exec('PRAGMA busy_timeout=15000; BEGIN EXCLUSIVE');
   return mutex;
 }
-async function attach(name:string) {
+async function attach(id:string) {
   if(process.stdin.isTTY && process.env.PHILBY_DETACHED!=='1') {
     if(process.env.TMUX?.split(',')[0]===tmux(['display-message','-p','#{socket_path}']).stdout.trim()) return;
     if(process.platform==='darwin' && process.env.KITTY_WINDOW_ID) {
@@ -56,34 +56,34 @@ async function attach(name:string) {
     }
     const child=spawn('tmux',['-L',server(),'attach-session','-t','philby'],{stdio:'inherit'});
     await new Promise<void>((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error(`tmux exited ${code}`)));});
-  } else console.log(name);
+  } else console.log(id);
 }
-export async function openFrame(name:string,type?:string) {
+export async function openFrame(id:string,type?:string) {
   const mutex=openingLock();
   let target:string;
   try {
-    prepare(name,type);
-    const current=await running(name);
+    prepare(id,type);
+    const current=await running(id);
     const windows=tmux(['list-windows','-t','philby','-F','#{window_id}\t#{window_name}'],true).stdout || '';
-    const existing=windows.split('\n').find(s=>s.split('\t')[1]===name)?.split('\t')[0];
-    if(current) {if(!existing) throw Error(`${name} is running without a tmux view`); target=existing;}
+    const existing=windows.split('\n').find(s=>s.split('\t')[1]===id)?.split('\t')[0];
+    if(current) {if(!existing) throw Error(`${id} is running without a tmux view`); target=existing;}
     else {
       if(existing) tmux(['kill-window','-t',existing],true);
-      const command=launch('serve',name);
+      const command=launch('serve',id);
       const has=tmux(['has-session','-t','philby'],true).status===0;
-      target=tmux(has?['new-window','-d','-P','-F','#{window_id}','-t','philby:','-n',name,'-c',root,command]:['new-session','-d','-P','-F','#{window_id}','-s','philby','-n',name,'-c',root,command]).stdout.trim();
-      tmux(['select-pane','-t',target,'-T',name]);
+      target=tmux(has?['new-window','-d','-P','-F','#{window_id}','-t','philby:','-n',id,'-c',root,command]:['new-session','-d','-P','-F','#{window_id}','-s','philby','-n',id,'-c',root,command]).stdout.trim();
+      tmux(['select-pane','-t',target,'-T',id]);
       let ready=false;
-      for(let i=0;i<200;i++) {if(await running(name)){ready=true;break;}await sleep(100);}
-      if(!ready) {const capture=tmux(['capture-pane','-p','-t',target],true).stdout;throw Error(`Frame ${name} failed to start. ${capture}`);}
+      for(let i=0;i<200;i++) {if(await running(id)){ready=true;break;}await sleep(100);}
+      if(!ready) {const capture=tmux(['capture-pane','-p','-t',target],true).stdout;throw Error(`Frame ${id} failed to start. ${capture}`);}
     }
     tmux(['set-option','-g','@philby_new_window',launch('new')]);
     tmux(['select-window','-t',target]);
-    const view=tmux(['list-panes','-t',target,'-F','#{pane_id}\t#{pane_title}']).stdout.trim().split('\n').filter(line=>line.split('\t')[1]===name);
-    if(view.length!==1) throw Error(`Expected one agent view for ${name}`);
+    const view=tmux(['list-panes','-t',target,'-F','#{pane_id}\t#{pane_title}']).stdout.trim().split('\n').filter(line=>line.split('\t')[1]===id);
+    if(view.length!==1) throw Error(`Expected one agent view for ${id}`);
     tmux(['select-pane','-t',view[0].split('\t')[0]]);
   } finally {mutex.close();}
-  await attach(name);
+  await attach(id);
 }
 export async function openSelector() {
   const mutex=openingLock();

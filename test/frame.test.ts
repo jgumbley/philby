@@ -30,7 +30,7 @@ function fixture(responses: Parameters<ReturnType<typeof fauxProvider>['setRespo
 async function until(fn:()=>Promise<boolean>|boolean) {for(let i=0;i<200;i++){if(await fn())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out');}
 function runCli(command:string,environment:NodeJS.ProcessEnv) {
   return new Promise<{code:number|null;stdout:string;stderr:string}>((resolve,reject)=>{
-    const child=spawn(process.execPath,['--disable-warning=ExperimentalWarning',new URL('../src/cli.js',import.meta.url).pathname,command],{env:{...process.env,...environment},stdio:['ignore','pipe','pipe']});
+    const child=spawn(process.execPath,['--disable-warning=ExperimentalWarning',new URL('../src/cli.js',import.meta.url).pathname,command],{env:{...process.env,id:undefined,PHILBY_FRAME:undefined,...environment},stdio:['ignore','pipe','pipe']});
     let stdout='',stderr='';
     child.stdout.on('data',chunk=>stdout+=chunk);
     child.stderr.on('data',chunk=>stderr+=chunk);
@@ -101,10 +101,10 @@ test('edited frame settings control reopening without replacing saved history or
   assert.equal((await (await p.conversation.submit({type:'input',content:'retained history'},ctx)).wait(ctx)).status,'done');
   const history=await p.operation({op:'capture'});
   await p.close();
-  const file=join(paths(p.name).tools,'frame.env');
+  const file=join(paths(p.id).tools,'frame.env');
   const source='FRAME_MODEL=test/owner/alternate\nFRAME_THINKING_LEVEL=high\n';
   writeFileSync(file,source);
-  const reopened=await Frame.open(p.name,models,()=>{throw Error('new-frame default must not be evaluated');});
+  const reopened=await Frame.open(p.id,models,()=>{throw Error('new-frame default must not be evaluated');});
   try {
     assert.equal(reopened.conversation.id,id);
     assert.deepEqual((await reopened.conversation.agent(ctx)).model,alternate);
@@ -124,11 +124,11 @@ test('old saved frames seed schema settings from their exact saved agent without
   assert.equal((await (await p.conversation.submit({type:'input',content:'migration retains history'},ctx)).wait(ctx)).status,'done');
   const history=await p.operation({op:'capture'});
   await p.close();
-  const tools=paths(p.name).tools;
+  const tools=paths(p.id).tools;
   rmSync(join(tools,'frame.env'));
   rmSync(join(tools,'.env.schema'));
   writeFileSync(join(tools,'SCOPE.md'),'edited migration scope');
-  const reopened=await Frame.open(p.name,f.models,()=>{throw Error('migration must not read DEFAULT_MODEL');});
+  const reopened=await Frame.open(p.id,f.models,()=>{throw Error('migration must not read DEFAULT_MODEL');});
   try {
     assert.equal(reopened.conversation.id,id);
     assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
@@ -146,18 +146,18 @@ test('closed frame settings migration needs no provider and preserves the saved 
   await p.operation({op:'memory',field:'notes',content:'offline migration memory'});
   assert.equal((await (await p.conversation.submit({type:'input',content:'offline migration history'},ctx)).wait(ctx)).status,'done');
   const history=await p.operation({op:'capture'});
-  await assert.rejects(migrateFrameSettings(p.name),/already running/);
+  await assert.rejects(migrateFrameSettings(p.id),/already running/);
   await p.close();
-  const tools=paths(p.name).tools;
+  const tools=paths(p.id).tools;
   rmSync(join(tools,'frame.env'));
   rmSync(join(tools,'.env.schema'));
-  assert.deepEqual(await migrateFrameSettings(p.name),{slug:p.name,migrated:true});
+  assert.deepEqual(await migrateFrameSettings(p.id),{id:p.id,migrated:true});
   assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
   const source=readFileSync(join(tools,'frame.env'),'utf8');
-  assert.deepEqual(await migrateFrameSettings(p.name),{slug:p.name,migrated:false});
+  assert.deepEqual(await migrateFrameSettings(p.id),{id:p.id,migrated:false});
   assert.equal(readFileSync(join(tools,'frame.env'),'utf8'),source);
   assert.equal(f.faux.state.callCount,1);
-  const reopened=await Frame.open(p.name,f.models,()=>{throw Error('migrated frame must not use default');});
+  const reopened=await Frame.open(p.id,f.models,()=>{throw Error('migrated frame must not use default');});
   try {
     assert.equal(reopened.conversation.id,id);
     assert.deepEqual(await reopened.operation({op:'capture'}),history);
@@ -171,17 +171,17 @@ test('invalid saved frame configuration fails without replacing the store or ret
   const id=p.conversation.id;
   await p.operation({op:'memory',field:'notes',content:'must survive invalid settings'});
   await p.close();
-  const tools=paths(p.name).tools,file=join(tools,'frame.env'),schema=join(tools,'.env.schema');
+  const tools=paths(p.id).tools,file=join(tools,'frame.env'),schema=join(tools,'.env.schema');
   const original=readFileSync(file,'utf8'),originalSchema=readFileSync(schema,'utf8');
   writeFileSync(file,'FRAME_MODEL=secret-invalid-marker\n');
-  await assert.rejects(Frame.open(p.name,f.models,model),error=>error instanceof Error && /invalid/.test(error.message) && !error.message.includes('secret-invalid-marker'));
+  await assert.rejects(Frame.open(p.id,f.models,model),error=>error instanceof Error && /invalid/.test(error.message) && !error.message.includes('secret-invalid-marker'));
   assert.equal(readFileSync(file,'utf8'),'FRAME_MODEL=secret-invalid-marker\n');
   writeFileSync(file,original);
   rmSync(schema);
-  await assert.rejects(Frame.open(p.name,f.models,model),/schema|missing/i);
+  await assert.rejects(Frame.open(p.id,f.models,model),/schema|missing/i);
   assert.equal(existsSync(schema),false);
   writeFileSync(schema,originalSchema);
-  const reopened=await Frame.open(p.name,f.models,model);
+  const reopened=await Frame.open(p.id,f.models,model);
   try {
     assert.equal(reopened.conversation.id,id);
     assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);
@@ -190,7 +190,7 @@ test('invalid saved frame configuration fails without replacing the store or ret
 });
 test('failed settings writes leave the runtime and saved selection unchanged',async t=>{
   const p=await Frame.open('settings-write-failure',fixture().models,model);
-  const tools=paths(p.name).tools,original=readFileSync(join(tools,'frame.env'),'utf8');
+  const tools=paths(p.id).tools,original=readFileSync(join(tools,'frame.env'),'utf8');
   const rename=t.mock.method(fs,'renameSync',()=>{throw Error('injected settings write failure');});
   syncBuiltinESMExports();
   try {
@@ -206,7 +206,7 @@ test('failed settings writes leave the runtime and saved selection unchanged',as
 test('a synchronization failure after publishing settings closes the frame and reconciles on reopen',async t=>{
   const f=fixture();
   const p=await Frame.open('settings-sync-failure',f.models,model);
-  const id=p.conversation.id,tools=paths(p.name).tools;
+  const id=p.conversation.id,tools=paths(p.id).tools;
   const originalSync=fs.fsyncSync;
   const sync=t.mock.method(fs,'fsyncSync',(descriptor:number)=>{
     if(fs.fstatSync(descriptor).isDirectory()) throw Error('injected directory sync failure');
@@ -221,7 +221,7 @@ test('a synchronization failure after publishing settings closes the frame and r
     sync.mock.restore();syncBuiltinESMExports();
     await p.close();
   }
-  const reopened=await Frame.open(p.name,f.models,model);
+  const reopened=await Frame.open(p.id,f.models,model);
   try {
     assert.equal(reopened.conversation.id,id);
     assert.equal((await reopened.conversation.agent(ctx)).thinkingLevel,'high');
@@ -230,14 +230,14 @@ test('a synchronization failure after publishing settings closes the frame and r
 test('saved settings reconcile after a failed runtime projection',async t=>{
   const f=fixture();
   const p=await Frame.open('settings-projection-failure',f.models,model);
-  const id=p.conversation.id,tools=paths(p.name).tools;
+  const id=p.conversation.id,tools=paths(p.id).tools;
   const configure=t.mock.method(p.conversation,'configure',async()=>{throw Error('injected projection failure');});
   try {
     await assert.rejects(p.operation({op:'thinking',level:'high'}),/injected projection failure/);
     assert.equal(p.closing,true);
     assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
   } finally {configure.mock.restore();await p.close();}
-  const reopened=await Frame.open(p.name,f.models,model);
+  const reopened=await Frame.open(p.id,f.models,model);
   try {
     assert.equal(reopened.conversation.id,id);
     assert.equal((await reopened.conversation.agent(ctx)).thinkingLevel,'high');
@@ -254,7 +254,7 @@ test('concurrent frame setting updates serialize without losing model or thinkin
       p.operation({op:'thinking',level:'high'}),
       p.operation({op:'model',...model}),
     ]);
-    assert.deepEqual(readFrameSettings(paths(p.name).tools),{model,thinkingLevel:'high',messaging:true});
+    assert.deepEqual(readFrameSettings(paths(p.id).tools),{model,thinkingLevel:'high',messaging:true});
     assert.deepEqual((await p.conversation.agent(ctx)).model,model);
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
     assert.equal(provider.state.callCount,0);
@@ -612,7 +612,7 @@ test('disabled messaging rejects messages and reports through live operations an
       assert.deepEqual(mailbox.pending(),[]);
     } finally {mailbox.close();}
     for(const command of ['send','report'])for(const [from,to] of [[enabled,disabled],[disabled,enabled]]) {
-      const result=await runCli(command,{slug:to,from,PROMPT:'CLI blocked message'});
+      const result=await runCli(command,{id:to,from,PROMPT:'CLI blocked message'});
       assert.notEqual(result.code,0);
       assert.match(result.stderr,/messaging.*disabled/i);
     }
@@ -700,6 +700,27 @@ test('model and thinking selection preserve disabled messaging across reopening'
     assert.equal(provider.state.callCount,0);
   } finally {await reopened.close();}
 });
+test('CLI frame IDs route explicitly and reject invalid IDs before changing a frame',async()=>{
+  const current=await Frame.open('id-current',fixture().models,model);
+  const receiver=await Frame.open('id-receiver',fixture().models,model);
+  try {
+    assert.equal(current.id,'id-current');
+    assert.equal(receiver.store.id,receiver.id);
+    const explicit=await runCli('memory',{id:receiver.id,PHILBY_FRAME:current.id,FIELD:'notes',PROMPT:'receiver memory'});
+    assert.equal(explicit.code,0,explicit.stderr);
+    const inferred=await runCli('memory',{PHILBY_FRAME:current.id,FIELD:'notes',PROMPT:'current memory'});
+    assert.equal(inferred.code,0,inferred.stderr);
+    const status=await runCli('status',{id:receiver.id,PHILBY_FRAME:current.id});
+    assert.equal(status.code,0,status.stderr);
+    assert.equal(JSON.parse(status.stdout).id,receiver.id);
+    assert.equal(JSON.parse(status.stdout).memory.notes,'receiver memory');
+    const invalid=await runCli('memory',{id:'../id-receiver',PHILBY_FRAME:current.id,FIELD:'notes',PROMPT:'invalid overwrite'});
+    assert.notEqual(invalid.code,0);
+    assert.match(invalid.stderr,/Frame ID must be/);
+    assert.equal((await current.harness.snapshot(Memory,current.conversation.id,ctx))?.notes,'current memory');
+    assert.equal((await receiver.harness.snapshot(Memory,receiver.conversation.id,ctx))?.notes,'receiver memory');
+  } finally {await current.close();await receiver.close();}
+});
 test('CLI messaging changes require a closed frame and retain saved settings and conversation',async()=>{
   const name='messaging-cli',f=fixture();
   const frame=await Frame.open(name,f.models,model);
@@ -710,21 +731,21 @@ test('CLI messaging changes require a closed frame and retain saved settings and
     await frame.operation({op:'memory',field:'notes',content:'toggle preserves memory'});
     assert.equal((await (await frame.conversation.submit({type:'input',content:'toggle preserves history'},ctx)).wait(ctx)).status,'done');
     history=await frame.operation({op:'capture'});
-    const query=await runCli('messaging',{slug:name,ENABLED:undefined});
+    const query=await runCli('messaging',{id:name,ENABLED:undefined});
     assert.equal(query.code,0,query.stderr);
-    assert.deepEqual(JSON.parse(query.stdout),{slug:name,enabled:true,running:true,active:true});
+    assert.deepEqual(JSON.parse(query.stdout),{id:name,enabled:true,running:true,active:true});
     const before=readFileSync(file,'utf8');
-    const runningChange=await runCli('messaging',{slug:name,ENABLED:'false'});
+    const runningChange=await runCli('messaging',{id:name,ENABLED:'false'});
     assert.notEqual(runningChange.code,0);
     assert.match(runningChange.stderr,/already running|closed/i);
     assert.equal(readFileSync(file,'utf8'),before);
   } finally {await frame.close();}
   const before=readFileSync(file,'utf8');
-  const invalid=await runCli('messaging',{slug:name,ENABLED:'0'});
+  const invalid=await runCli('messaging',{id:name,ENABLED:'0'});
   assert.notEqual(invalid.code,0);
   assert.match(invalid.stderr,/ENABLED/);
   assert.equal(readFileSync(file,'utf8'),before);
-  const changed=await runCli('messaging',{slug:name,ENABLED:'false'});
+  const changed=await runCli('messaging',{id:name,ENABLED:'false'});
   assert.equal(changed.code,0,changed.stderr);
   assert.equal(JSON.parse(changed.stdout).enabled,false);
   assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});

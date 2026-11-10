@@ -11,35 +11,35 @@ if(process.env.PHILBY_HOME) throw Error('PHILBY_HOME is no longer supported; use
 if(process.env.PHILBY_PANES_DIR) throw Error('PHILBY_PANES_DIR was renamed to PHILBY_FRAMES_DIR; migrate the directory with make frame-migrate INPUT=old-directory');
 export const framesRoot = resolve(process.env.PHILBY_FRAMES_DIR || join(root,'frames'));
 export const runtimeDir = join(tmpdir(), `philby-${process.getuid!()}-${createHash('sha256').update(framesRoot).digest('hex').slice(0,16)}`);
-export function slug(value: string) {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(value) || value.length > 64) throw Error('Slug must be 1–64 lowercase letters, digits or hyphens, beginning with a letter or digit');
+export function validateFrameId(value: string) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(value) || value.length > 64) throw Error('Frame ID must be 1–64 lowercase letters, digits or hyphens, beginning with a letter or digit');
   return value;
 }
-export function paths(name: string) {
-  slug(name);
-  if(existsSync(join(root,'.philby','frames',name))) throw Error(`Frame ${name} has unsupported legacy state; migrate it with a prior Philby version before opening`);
-  if(existsSync(join(root,'.philby','panes',name))) throw Error(`Frame ${name} has unsupported legacy state; migrate it with a prior Philby version before opening`);
+export function paths(id: string) {
+  validateFrameId(id);
+  if(existsSync(join(root,'.philby','frames',id))) throw Error(`Frame ${id} has unsupported legacy state; migrate it with a prior Philby version before opening`);
+  if(existsSync(join(root,'.philby','panes',id))) throw Error(`Frame ${id} has unsupported legacy state; migrate it with a prior Philby version before opening`);
   if(!process.env.PHILBY_FRAMES_DIR && existsSync(join(root,'panes'))) throw Error('Legacy panes/ directory exists; run make frame-migrate before opening frames');
-  const tools = join(framesRoot, name);
+  const tools = join(framesRoot, id);
   const state = join(tools, '.state');
   const socketDir = runtimeDir;
-  return { state, tools, socketDir, socket: join(socketDir, `${name}.sock`) };
+  return { state, tools, socketDir, socket: join(socketDir, `${id}.sock`) };
 }
 export function frameTypes() {
   return readdirSync(join(root,'frame-types'),{withFileTypes:true}).filter(entry=>entry.isDirectory() && /^[a-z0-9][a-z0-9-]*$/.test(entry.name)).map(entry=>entry.name).sort((a,b)=>a==='plain'?-1:b==='plain'?1:a.localeCompare(b));
 }
-export function configured(name: string) {
-  const p=paths(name);
+export function configured(id: string) {
+  const p=paths(id);
   return ['.frame-type','SCOPE.md','AGENTS.md','Makefile'].some(file=>existsSync(join(p.tools,file))) || existsSync(join(p.state,'durable.sqlite'));
 }
-export function prepare(name: string, type?: string) {
-  const p = paths(name);
+export function prepare(id: string, type?: string) {
+  const p = paths(id);
   if(type!==undefined && !frameTypes().includes(type)) throw Error(`Unknown frame type: ${type}`);
-  if(existsSync(join(p.tools,'AGENTS.md')) && !existsSync(join(p.tools,'SCOPE.md'))) throw Error(`Frame ${name} uses AGENTS.md; rename it to SCOPE.md before opening`);
+  if(existsSync(join(p.tools,'AGENTS.md')) && !existsSync(join(p.tools,'SCOPE.md'))) throw Error(`Frame ${id} uses AGENTS.md; rename it to SCOPE.md before opening`);
   const marker=join(p.tools,'.frame-type');
-  if(configured(name)) {
+  if(configured(id)) {
     const saved=existsSync(marker)?readFileSync(marker,'utf8').trim():'plain';
-    if(type!==undefined && type!==saved) throw Error(`Frame ${name} already exists with type ${saved}`);
+    if(type!==undefined && type!==saved) throw Error(`Frame ${id} already exists with type ${saved}`);
     if(existsSync(marker)) {
       for(const file of ['SCOPE.md','Makefile']) readFileSync(join(p.tools,file),'utf8');
     } else {
@@ -70,19 +70,19 @@ export function prepare(name: string, type?: string) {
   mkdirSync(p.socketDir, { recursive: true, mode: 0o700 });
   return p;
 }
-export function lock(name: string) {
-  const db = new DatabaseSync(join(prepare(name).state, 'lock.sqlite'));
-  try { db.exec('BEGIN EXCLUSIVE'); } catch (error) { db.close(); if((error as {errcode:number}).errcode===5) throw Error(`Frame ${name} is already running`); throw error; }
+export function lock(id: string) {
+  const db = new DatabaseSync(join(prepare(id).state, 'lock.sqlite'));
+  try { db.exec('BEGIN EXCLUSIVE'); } catch (error) { db.close(); if((error as {errcode:number}).errcode===5) throw Error(`Frame ${id} is already running`); throw error; }
   return () => db.close();
 }
 export type Envelope = { id: string; from: string; to: string; content: string; kind: 'input' | 'update'; mode: 'steer' | 'followUp' };
-export function messagingEnabled(name:string) {
-  return readFrameSettings(paths(name).tools)?.messaging ?? true;
+export function messagingEnabled(id:string) {
+  return readFrameSettings(paths(id).tools)?.messaging ?? true;
 }
 export class Store {
   db: DatabaseSync;
-  constructor(readonly name: string) {
-    const state=paths(name).state;
+  constructor(readonly id: string) {
+    const state=paths(id).state;
     mkdirSync(state,{recursive:true,mode:0o700});
     this.db = new DatabaseSync(join(state, 'app.sqlite'));
     try {this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
@@ -91,11 +91,11 @@ export class Store {
     } catch(error) {this.db.close();throw error;}
   }
   accept(e: Envelope) {
-    slug(e.from); slug(e.to);
-    if (e.to !== this.name) throw Error('Wrong receiving frame');
+    validateFrameId(e.from); validateFrameId(e.to);
+    if (e.to !== this.id) throw Error('Wrong receiving frame');
     if (!e.id || !e.content.trim()) throw Error('Request ID and nonempty content required');
     if(!['input','update'].includes(e.kind) || !['steer','followUp'].includes(e.mode)) throw Error('Invalid message kind or mode');
-    for(const name of new Set([e.from,e.to])) if(!messagingEnabled(name)) throw Error(`Messaging is disabled for frame ${name}`);
+    for(const id of new Set([e.from,e.to])) if(!messagingEnabled(id)) throw Error(`Messaging is disabled for frame ${id}`);
     const body = JSON.stringify(e);
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -125,11 +125,11 @@ export class Store {
   close() { this.db.close(); }
 }
 export function envelope(from: string, to: string, content: string, options: Partial<Envelope> = {}): Envelope {
-  return { id: randomUUID(), from: slug(from), to: slug(to), content, kind: 'input', mode: 'followUp', ...options };
+  return { id: randomUUID(), from: validateFrameId(from), to: validateFrameId(to), content, kind: 'input', mode: 'followUp', ...options };
 }
 
-export function locked(name: string) {
-  const path=join(paths(name).state,'lock.sqlite');
+export function locked(id: string) {
+  const path=join(paths(id).state,'lock.sqlite');
   if(!existsSync(path)) return false;
   const db=new DatabaseSync(path);
   try {db.exec('BEGIN EXCLUSIVE');return false;}catch(error){if((error as {errcode:number}).errcode===5)return true;throw error;}finally{db.close();}

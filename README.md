@@ -21,14 +21,14 @@ make
 `make deps` installs the resolved npm lockfile. Dependency declarations follow npm `latest`; `make deps-update` refreshes the lockfile and installation. `make` builds the application and opens the create/open frame screen in tmux. With no existing frames it starts at frame creation; no agent starts until you create or select a frame. Every frame is an ordinary workspace, with no built-in coordinator. `/model` selects and saves a frame's model. Saved frames retain their selection when reopened. Unknown models and missing credentials fail explicitly; Philby does not substitute another model.
 
 ```sh
-make frame slug=research
+make frame id=research
 make frame-new
 make frame-list
-make frame-close slug=research
+make frame-close id=research
 make quit
 ```
 
-Slugs are immutable and unique: 1–64 lowercase letters, digits or hyphens, beginning with an alphanumeric character. Opening a running frame focuses it; opening a closed frame resumes its conversation. `Ctrl-b d` detaches while work continues. `make quit` asks before closing all frames; `make cleanup` does the same cleanup without confirmation and retains state and tools.
+Frame IDs are immutable and unique within the frame hierarchy selected by `PHILBY_FRAMES_DIR`: 1–64 lowercase letters, digits or hyphens, beginning with an alphanumeric character. Opening a running frame focuses it; opening a closed frame resumes its conversation. `Ctrl-b d` detaches while work continues. `make quit` asks before closing all frames; `make cleanup` does the same cleanup without confirmation and retains state and tools.
 
 Use `PHILBY_DETACHED=1 make` to open without attaching. Terminal navigation, frame selection and workspace controls are documented in [tmux](tmux/README.md).
 
@@ -85,9 +85,9 @@ Legacy root `*.provider` files and `.state/providers.sqlite` are no longer read.
 | `.env.schema` | Instance settings, types and nonsecret defaults |
 | `.env` | Private instance values |
 | `shared/frame.env.schema` | Standard schema for saved frame settings |
-| `frames/<slug>/frame.env` | This frame's saved model, thinking preference and messaging toggle |
-| `frames/<slug>/.env.schema` | Additional schema for this frame's tools |
-| `frames/<slug>/.env` | Private values for this frame's tools |
+| `frames/<id>/frame.env` | This frame's saved model, thinking preference and messaging toggle |
+| `frames/<id>/.env.schema` | Additional schema for this frame's tools |
+| `frames/<id>/.env` | Private values for this frame's tools |
 
 A saved settings file looks like:
 
@@ -104,15 +104,15 @@ FRAME_MESSAGING=true
 Change messaging while the frame is closed, then reopen it:
 
 ```sh
-make frame-messaging slug=research
-make frame-close slug=research
-make frame-messaging slug=research ENABLED=false
-make frame slug=research
+make frame-messaging id=research
+make frame-close id=research
+make frame-messaging id=research ENABLED=false
+make frame id=research
 ```
 
 The first command reports the saved setting and, when running supported code, the active setting. The setter takes the frame's lifetime lock and preserves its other settings. It refuses to change a running frame. Set `ENABLED=true` while closed to re-enable messaging. Existing mailbox records and reports are retained. Requests already being accepted when the setting changes may finish acceptance. Undelivered mailbox items wait until messaging is re-enabled; inputs already submitted to Durable retain their normal recovery behavior. A fresh-session reset still refuses pending mailbox work. Disabling messaging does not erase messages already present in conversation history, and it does not restrict native shell or filesystem access.
 
-`/model` updates `frame.env` atomically before applying the choice to the existing conversation. To save a thinking preference on a running frame, use `make frame-thinking slug=research LEVEL=high`; `LEVEL=default` clears that preference. Edit `frame.env` directly only while the frame is closed, then reopen it. Durable retains the active projection of these settings alongside its conversation state. The file is authoritative when reopening; conversation history, memory, plans, mailbox records and queued work remain in their existing stores.
+`/model` updates `frame.env` atomically before applying the choice to the existing conversation. To save a thinking preference on a running frame, use `make frame-thinking id=research LEVEL=high`; `LEVEL=default` clears that preference. Edit `frame.env` directly only while the frame is closed, then reopen it. Durable retains the active projection of these settings alongside its conversation state. The file is authoritative when reopening; conversation history, memory, plans, mailbox records and queued work remain in their existing stores.
 
 For tool configuration, Varlock loads the instance directory followed by the frame directory. Frame values override instance values; explicit invocation environment variables take precedence over both. Varlock's `.env.local` and environment-specific file rules still apply. Philby passes explicit paths, including when `PHILBY_FRAMES_DIR` relocates frames. It tracks which environment values came from configuration so launching another frame does not turn the first frame's values into invocation overrides. Tmux launches use private environment snapshots, avoiding stale server values and keeping configuration values out of command arguments.
 
@@ -133,8 +133,8 @@ Put the values in that frame's ignored `.env`. `PHILBY_*`, `PI_CODING_AGENT_DIR`
 
 ```sh
 make config-check
-make frame-config-check slug=research
-make frame-config-migrate slug=research
+make frame-config-check id=research
+make frame-config-migrate id=research
 ```
 
 Checks print success or invalid key names without configuration values. The migration target requires a closed frame with a saved conversation and writes its exact saved model and explicit thinking preference to `frame.env`. It does not start a provider or resume work. Opening an existing frame without `frame.env` performs the same settings extraction under the frame's lifetime lock. A missing tool schema is added once during this upgrade; existing schemas, values and edited recipe files are preserved. After migration, a missing schema or malformed settings file is an error. No conversations are imported or replaced.
@@ -164,7 +164,7 @@ Philby loads compaction settings when a frame process opens. Close and reopen th
 
 ## Instructions and tools
 
-[FRAME.md](FRAME.md) supplies the operating guidance shared by every frame. `frames/<slug>/SCOPE.md` defines that frame's standing purpose, responsibilities, boundaries and subject-specific conventions. Both files are read when the frame opens and included in model requests after compaction. Close and reopen to load edits. A scope is ordinary Markdown with no required sections; a new plain frame starts with an empty scope. Root and module `AGENTS.md` files guide software development and are not loaded as runtime frame instructions.
+[FRAME.md](FRAME.md) supplies the operating guidance shared by every frame. `frames/<id>/SCOPE.md` defines that frame's standing purpose, responsibilities, boundaries and subject-specific conventions. Both files are read when the frame opens and included in model requests after compaction. Close and reopen to load edits. A scope is ordinary Markdown with no required sections; a new plain frame starts with an empty scope. Root and module `AGENTS.md` files guide software development and are not loaded as runtime frame instructions.
 
 When upgrading an existing frame, rename its `AGENTS.md` to `SCOPE.md`, preserving the contents. If `SCOPE.md` already exists, inspect the files rather than overwriting it. A frame with only the old filename fails with a migration message; Philby does not fall back to it or replace it with a blank scope. This rename does not change its conversation or memory.
 
@@ -172,7 +172,7 @@ Every frame can use shared tools, even with an empty local toolset. Its first mo
 
 Native `read`, `edit`, `write` and `bash` tools run in the frame's directory. Purpose-specific operations and diagnostics run through reusable Make targets: `make target` for frame tools or `make -C "$PHILBY_ROOT/shared" target` for shared tools. Namespaces organise tools; they are not a filesystem sandbox.
 
-Frame types are creation recipes. `make frame slug=knowledge TYPE=graphwiki` creates a frame with graph tools; omitting `TYPE` creates a plain frame. Each recipe provides an initial `SCOPE.md`. Reopening preserves edited files and never reapplies the recipe. Requesting a different type for an existing frame fails. Creating a mailbox alone does not choose a type.
+Frame types are creation recipes. `make frame id=knowledge TYPE=graphwiki` creates a frame with graph tools; omitting `TYPE` creates a plain frame. Each recipe provides an initial `SCOPE.md`. Reopening preserves edited files and never reapplies the recipe. Requesting a different type for an existing frame fails. Creating a mailbox alone does not choose a type.
 
 Graphwiki frames record all sourcing, attribution and references only in dated
 journals at write time, then maintain concept articles as the wiki reading view.
@@ -190,7 +190,7 @@ See the [graphwiki module](shared/graphwiki/README.md) for terminal controls.
 
 An optional nonempty `BOOT.md` queues an opening checklist behind recovered work. Its unfinished task resumes without duplicate submission. A frame with `BOOT.md` must supply a `make close` target for teardown. Closure suspends Durable work first, then awaits teardown with a 60-second deadline. Failures are reported while application resources are released. Detaching leaves work running.
 
-All frame directories are private and ignored by this repository. Clone or create independent frame repositories at `frames/<slug>` as needed, keeping `.state/` ignored there too. Creating a frame does not automatically initialise a Git repository.
+All frame directories are private and ignored by this repository. Clone or create independent frame repositories at `frames/<id>` as needed, keeping `.state/` ignored there too. Creating a frame does not automatically initialise a Git repository.
 
 ## Conversation, memory and messages
 
@@ -202,8 +202,8 @@ Enter submits, Shift-Enter inserts a newline, and follow-ups queue while work is
 | `/memory`, `/memory notes` | Inspect or edit durable memory |
 | `/tools` | Inspect frame and shared Makefiles |
 | `/updates` | Read and mark passive reports |
-| `/send slug message` | Queue input in the receiving frame |
-| `/report slug message` | Record a passive update in the receiving frame |
+| `/send id message` | Queue input in the receiving frame |
+| `/report id message` | Record a passive update in the receiving frame |
 | `/plan`, `/plan on`, `/plan off [plan]` | Read-only plan mode: research and present a plan before editing |
 | `/new` | Start a fresh session, preserving files, tools, memory and archived history |
 | `/close`, `/quit` | Suspend this frame or confirm closing the workspace |
@@ -213,10 +213,10 @@ Memory fields are `responsibilities`, `notes`, `decisions`, `outstanding` and `s
 Plan mode restricts the frame to read-only operations. While active, the model can use the native `read` tool to examine files but cannot edit files or run shell commands. The header shows `PLAN MODE` when active. Entering plan mode requires no active work; exit with `/plan off` to resume normal operation. An approved plan supplied at exit is included in subsequent model context.
 
 ```sh
-make frame-plan slug=research
-make frame-plan-set slug=research ACTIVE=1
-make frame-plan-set slug=research ACTIVE=0 PLAN='1. Implement the feature'
-printf '1. Step one\n2. Step two\n' | make frame-plan-set slug=research ACTIVE=0
+make frame-plan id=research
+make frame-plan-set id=research ACTIVE=1
+make frame-plan-set id=research ACTIVE=0 PLAN='1. Implement the feature'
+printf '1. Step one\n2. Step two\n' | make frame-plan-set id=research ACTIVE=0
 ```
 
 `ACTIVE` must be exactly `0`, `1`, `true`, or `false`. A nonempty `PLAN` supplies the approved plan; otherwise use the usual `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin precedence. Exiting without replacement text preserves any previously saved plan. Reads of explicit prompt files fail visibly if unavailable.
@@ -224,22 +224,22 @@ printf '1. Step one\n2. Step two\n' | make frame-plan-set slug=research ACTIVE=0
 `/new` starts a fresh model context in the existing Durable conversation while retaining prior transcript entries, files, tools, instructions, durable memory and model selection. Plan mode begins off with no approved plan in the fresh context. `/new` rejects while work is active, queued or awaiting mailbox delivery; it does not cancel work. Reopening preserves the fresh context. Add `ALL=1` to capture the full archived history in chronological order.
 
 ```sh
-make frame-new-session slug=research
-make frame-capture slug=research ALL=1
+make frame-new-session id=research
+make frame-capture id=research ALL=1
 ```
 
 ```sh
-make frame-memory slug=research FIELD=notes PROMPT_FILE=/absolute/path/notes.txt
-make frame-send slug=research from=work REQUEST_ID=research-001 PROMPT_FILE=/absolute/path/request.txt
-printf 'First line\nSecond line\n' | make frame-send slug=research from=work
-make frame-report slug=work from=research prompt='Review complete'
-make frame-updates slug=work MARK=1
-make frame-capture slug=research
+make frame-memory id=research FIELD=notes PROMPT_FILE=/absolute/path/notes.txt
+make frame-send id=research from=work REQUEST_ID=research-001 PROMPT_FILE=/absolute/path/request.txt
+printf 'First line\nSecond line\n' | make frame-send id=research from=work
+make frame-report id=work from=research prompt='Review complete'
+make frame-updates id=work MARK=1
+make frame-capture id=research
 ```
 
 Prompt precedence is `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin. Files and stdin preserve multiline content and shell metacharacters. Relative paths use the command's working directory; use absolute paths with `make -C`. Failures return nonzero. Capture returns the active transcript as JSON, even for a closed frame; treat that output as private.
 
-Messages and reports require messaging enabled at both endpoints and `slug` to identify the receiving frame. `from` identifies the sender; inside a frame it can be inferred from `PHILBY_FRAME`, while commands run outside a frame must supply it. Acceptance means the receiving mailbox transaction has committed, including when that frame is closed. It does not mean the work is complete. Reuse the same stable `REQUEST_ID` for retries. Conflicting content for an ID is rejected within the receiving frame; there is no global ID registry. Reports remain passive.
+Messages and reports require messaging enabled at both endpoints and `id` to identify the receiving frame. `from` identifies the sender; inside a frame it can be inferred from `PHILBY_FRAME`, while commands run outside a frame must supply it. Acceptance means the receiving mailbox transaction has committed, including when that frame is closed. It does not mean the work is complete. Reuse the same stable `REQUEST_ID` for retries. Conflicting content for an ID is rejected within the receiving frame; there is no global ID registry. Reports remain passive.
 
 ## Modules
 
@@ -269,7 +269,7 @@ Shared `google-workspace-*` targets read Google Chat, Docs, Sheets, Slides and D
 
 ## State and verification
 
-Each frame lives entirely under `frames/<slug>/`: its scope, Makefile, tools, working files and private `.state/` directory. `.state/durable.sqlite` stores conversation, memory and task state; `.state/app.sqlite` stores mailbox records and reports. Each slug has one application process and Durable store. A SQLite lifetime lock prevents duplicate owners; private Unix sockets carry local commands.
+Each frame lives entirely under `frames/<id>/`: its scope, Makefile, tools, working files and private `.state/` directory. `.state/durable.sqlite` stores conversation, memory and task state; `.state/app.sqlite` stores mailbox records and reports. Each frame ID has one application process and Durable store. A SQLite lifetime lock prevents duplicate owners; private Unix sockets carry local commands.
 
 ### Renaming existing panes to frames
 
@@ -281,7 +281,7 @@ make frame-migrate
 
 This renames the existing `panes/` tree to `frames/` in place, changes `.pane-type` markers to `.frame-type`, and updates terminology and Philby command/path references in local Markdown, Makefiles and source scripts. Edited tools and working files remain in place. Private `.state/` directories, saved conversations, memory, archived sessions, mailbox records and request IDs are not rewritten or imported. Symlinks and binary artifacts are left untouched. Destination or marker collisions fail explicitly rather than merging or overwriting data.
 
-Close existing operators and browser services before migrating, then reopen with `make frame slug=<slug>`. If migrating from the operator performing this refactor, finish the turn, close that old process and reopen it before further work; running processes retain their old working paths and environment. Update external shell configuration from `PHILBY_PANE` / `PHILBY_PANES_DIR` to `PHILBY_FRAME` / `PHILBY_FRAMES_DIR`. Old command aliases are not retained.
+Close existing operators and browser services before migrating, then reopen with `make frame id=<id>`. If migrating from the operator performing this refactor, finish the turn, close that old process and reopen it before further work; running processes retain their old working paths and environment. Update external shell configuration from `PHILBY_PANE` / `PHILBY_PANES_DIR` to `PHILBY_FRAME` / `PHILBY_FRAMES_DIR`. Old command aliases are not retained.
 
 For a relocated tree, use `make frame-migrate INPUT=/absolute/old-directory PHILBY_FRAMES_DIR=/absolute/new-directory`. The default source is this checkout's `panes/`, not the obsolete environment variable. Back up closed operators before migration. Historical transcript text retains its original wording.
 

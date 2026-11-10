@@ -2,10 +2,10 @@ import { createConnection, createServer, type Server } from 'node:net';
 import { chmodSync, rmSync } from 'node:fs';
 import { paths } from './store.js';
 export type Command = { op: string; [key: string]: unknown };
-export async function running(name:string) {try {return await request(name,{op:'status'});}catch(e){if(['ENOENT','ECONNREFUSED'].includes((e as NodeJS.ErrnoException).code || ''))return undefined;throw e;}}
-export function request(name: string, command: Command): Promise<any> {
+export async function running(id:string) {try {return await request(id,{op:'status'});}catch(e){if(['ENOENT','ECONNREFUSED'].includes((e as NodeJS.ErrnoException).code || ''))return undefined;throw e;}}
+export function request(id: string, command: Command): Promise<any> {
   return new Promise((resolve, reject) => {
-    const socket = createConnection(paths(name).socket);
+    const socket = createConnection(paths(id).socket);
     let data = '';
     socket.setTimeout(command.op==='close'?90000:command.op==='model'?30000:15000, () => socket.destroy(Error('Frame command timed out')));
     socket.on('connect', () => socket.write(JSON.stringify(command) + '\n'));
@@ -20,8 +20,8 @@ export function request(name: string, command: Command): Promise<any> {
     socket.on('end', () => { if (!data.includes('\n')) reject(Error('Frame closed before acknowledgement')); });
   });
 }
-export async function listen(name: string, operation: (cmd: Command) => Promise<unknown>): Promise<Server> {
-  const path = paths(name).socket;
+export async function listen(id: string, operation: (cmd: Command) => Promise<unknown>): Promise<Server> {
+  const path = paths(id).socket;
   rmSync(path, { force: true });
   const server = createServer(socket => {
     let data = ''; let handled = false;

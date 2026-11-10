@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { root, framesRoot, slug, Store, envelope, locked, lock, configured, frameTypes, paths, prepare } from './store.js';
+import { root, framesRoot, validateFrameId, Store, envelope, locked, lock, configured, frameTypes, paths, prepare } from './store.js';
 import { applyEnvironment, frameEnvironment } from './config.js';
 import { readFrameSettings, writeFrameSettings } from './frame-config.js';
 import { request, running } from './ipc.js';
@@ -22,19 +22,19 @@ async function prompt() {
   if(process.stdin.isTTY) throw Error('Supply PROMPT_FILE, prompt, or stdin');
   return readFileSync(0,'utf8');
 }
-async function send(name:string|undefined,kind:'input'|'update') {
-  if(!name) throw Error('Supply slug=<receiving-frame> for send or report');
-  name=slug(name);
+async function send(id:string|undefined,kind:'input'|'update') {
+  if(!id) throw Error('Supply id=<receiving-frame> for send or report');
+  id=validateFrameId(id);
   const sender=process.env.from || process.env.PHILBY_FRAME;
   if(!sender) throw Error('Supply from=<sending-frame> or run from a frame');
-  const from=slug(sender);
+  const from=validateFrameId(sender);
   const content=await prompt();
-  const e=envelope(from,name,content,{...(process.env.REQUEST_ID?{id:process.env.REQUEST_ID}:{}),kind,mode:process.env.MODE==='steer'?'steer':'followUp'});
-  const store=new Store(name);
+  const e=envelope(from,id,content,{...(process.env.REQUEST_ID?{id:process.env.REQUEST_ID}:{}),kind,mode:process.env.MODE==='steer'?'steer':'followUp'});
+  const store=new Store(id);
   try {console.log(JSON.stringify({accepted:store.accept(e)}));} finally {store.close();}
 }
 async function cleanup(current?:Frame) {
-  const others=()=>saved().filter(s=>s!==current?.name);
+  const others=()=>saved().filter(s=>s!==current?.id);
   for(const s of others()) if(await running(s)) await request(s,{op:'close'});
   for(let i=0;i<300 && others().some(locked);i++) await sleep(100);
   if(others().some(locked)) throw Error('Cleanup timed out waiting for graceful frame closure');
@@ -43,7 +43,7 @@ async function cleanup(current?:Frame) {
   stopServer();
 }
 async function main() {
-  const command=process.argv[2] || 'open';const destination=process.argv[3] || process.env.slug;
+  const command=process.argv[2] || 'open';const destination=process.argv[3] || process.env.id;
   const type=process.env.TYPE || undefined;
   if(command==='config-check') {console.log('Instance configuration valid.');return;}
   if(command==='migrate') {
@@ -51,13 +51,13 @@ async function main() {
     console.log('Reopen migrated frames before further work; existing processes retain their old paths.');
     return;
   }
-  for(const key of ['slug','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) delete process.env[key];
-  if(command==='name') return selectFrame(openFrame,await Promise.all(saved().sort().map(async name=>({name,running:!!await running(name)}))),frameTypes());
+  for(const key of ['id','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) delete process.env[key];
+  if(command==='name') return selectFrame(openFrame,await Promise.all(saved().sort().map(async id=>({id,running:!!await running(id)}))),frameTypes());
   if(command==='new') return openSelector();
-  if(command==='open') return destination?openFrame(slug(destination),type):openSelector();
+  if(command==='open') return destination?openFrame(validateFrameId(destination),type):openSelector();
   if(command==='send' || command==='report') return send(destination,command==='report'?'update':'input');
   if(command==='list') {
-    console.log('Agent slug\tState (saved = closed)');
+    console.log('Frame ID\tState (saved = closed)');
     for(const s of saved()) console.log(`${s}\t${await running(s)?'running':'saved'}`);
     process.stdout.write(listViews());
     return;
@@ -78,7 +78,7 @@ async function main() {
   if(command==='window') return openShell();
   if(command==='consult') {
     if(process.env.PHILBY_FRAME) {
-      const frame=slug(process.env.PHILBY_FRAME);
+      const frame=validateFrameId(process.env.PHILBY_FRAME);
       applyEnvironment(frameEnvironment(paths(frame).tools,frame,framesRoot));
     }
     const route=process.env.ROUTE || 'ask';
@@ -98,45 +98,45 @@ async function main() {
     } finally {await harness.close(ctx);}return;
   }
   const selected=destination || process.env.PHILBY_FRAME;
-  if(!selected) throw Error(`Supply slug=<frame> for ${command}, or run from a frame`);
-  const name=slug(selected);
+  if(!selected) throw Error(`Supply id=<frame> for ${command}, or run from a frame`);
+  const id=validateFrameId(selected);
   if(command==='messaging') {
-    const directory=paths(name).tools;
+    const directory=paths(id).tools;
     const settings=readFrameSettings(directory);
     if(!settings) throw Error('Missing frame.env; open the frame or run make frame-config-migrate first');
     if(process.env.ENABLED===undefined) {
-      const active=await running(name);
-      console.log(JSON.stringify({slug:name,enabled:settings.messaging,running:!!active,active:active?.messaging ?? null}));return;
+      const active=await running(id);
+      console.log(JSON.stringify({id,enabled:settings.messaging,running:!!active,active:active?.messaging ?? null}));return;
     }
     if(process.env.ENABLED!=='true' && process.env.ENABLED!=='false') throw Error('Supply ENABLED=true or ENABLED=false');
-    const release=lock(name);
+    const release=lock(id);
     try {
       const current=readFrameSettings(directory);
       if(!current) throw Error('Missing frame.env');
       const enabled=process.env.ENABLED==='true';
       writeFrameSettings(directory,{...current,messaging:enabled});
-      console.log(JSON.stringify({slug:name,enabled}));
+      console.log(JSON.stringify({id,enabled}));
     } finally {release();}
     return;
   }
-  if(command==='config-migrate') {console.log(JSON.stringify(await migrateFrameSettings(name)));return;}
+  if(command==='config-migrate') {console.log(JSON.stringify(await migrateFrameSettings(id)));return;}
   if(command==='frame-config-check') {
-    frameEnvironment(paths(name).tools,name,framesRoot);
-    if(!readFrameSettings(paths(name).tools)) throw Error('Missing frame.env; open a new frame or run make frame-config-migrate for a saved frame');
-    console.log(`Frame ${name} configuration valid.`);return;
+    frameEnvironment(paths(id).tools,id,framesRoot);
+    if(!readFrameSettings(paths(id).tools)) throw Error('Missing frame.env; open a new frame or run make frame-config-migrate for a saved frame');
+    console.log(`Frame ${id} configuration valid.`);return;
   }
   if(command==='serve') {
-    const environment=frameEnvironment(prepare(name).tools,name,framesRoot);
+    const environment=frameEnvironment(prepare(id).tools,id,framesRoot);
     applyEnvironment(environment);
-    const config=await models();const frame=await Frame.open(name,config.models,()=>config.model ?? modelReference(process.env.DEFAULT_MODEL),environment);
+    const config=await models();const frame=await Frame.open(id,config.models,()=>config.model ?? modelReference(process.env.DEFAULT_MODEL),environment);
     const close=()=>{void frame.close().catch(e=>{console.error(String(e));process.exitCode=1;});};
     for(const signal of ['SIGTERM','SIGINT','SIGHUP'] as const) process.on(signal,close);
     if(process.stdin.isTTY) await startTui(frame,()=>cleanup(frame));
     return;
   }
-  if(command==='capture' && !await running(name)) {
-    const path=join(paths(name).state,'durable.sqlite');if(!existsSync(path)) throw Error('No saved conversation');
-    const release=lock(name);
+  if(command==='capture' && !await running(id)) {
+    const path=join(paths(id).state,'durable.sqlite');if(!existsSync(path)) throw Error('No saved conversation');
+    const release=lock(id);
     const h=await Harness.open(await openNodeSqliteStorage(path),{models:createModels(),registry:createRegistry()},ctx);
     try {console.log(JSON.stringify(await capture(await h.root(ctx),process.env.ALL==='1'),null,2));}finally{await h.close(ctx);release();}return;
   }
@@ -158,6 +158,6 @@ async function main() {
   }
   if(command==='updates') op.mark=process.env.MARK==='1';
   if(command==='capture') op.all=process.env.ALL==='1';
-  console.log(JSON.stringify(await request(name,op as {op:string}),null,2));
+  console.log(JSON.stringify(await request(id,op as {op:string}),null,2));
 }
 main().catch(e=>{console.error(String(e));process.exitCode=1;});

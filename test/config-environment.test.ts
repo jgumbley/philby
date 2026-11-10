@@ -83,10 +83,12 @@ test('frame environment rejects reserved identities and managed settings',t=>{
 
 test('cross-frame launches strip loaded values while preserving actual and changed invocation overrides',t=>{
   const f=fixture(t);
-  const inherited=result(frame(f.one,'one',f.frames),f.env);
-  const tool=result('console.log(JSON.stringify({frame:process.env.PHILBY_FRAME,launchFrame:invocationEnvironment.PHILBY_FRAME,oneOnly:process.env.ONE_ONLY,model:process.env.ASK_MODEL}));',inherited);
+  const inherited=result(frame(f.one,'one',f.frames),{...f.env,id:'one'});
+  assert.equal(inherited.id,undefined);
+  const tool=result('console.log(JSON.stringify({id:process.env.id,launchId:invocationEnvironment.id,frame:process.env.PHILBY_FRAME,launchFrame:invocationEnvironment.PHILBY_FRAME,oneOnly:process.env.ONE_ONLY,model:process.env.ASK_MODEL}));',inherited);
   assert.deepEqual(tool,{frame:'one',model:'provider/instance'});
   const second=result(frame(f.two,'two',f.frames),inherited);
+  assert.equal(second.id,undefined);
   assert.equal(second.ASK_MODEL,'provider/two');
   assert.equal(second.ONE_ONLY,undefined);
   assert.equal(second.PHILBY_FRAME,'two');

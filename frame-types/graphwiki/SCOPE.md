@@ -1,7 +1,7 @@
 # Graphwiki scope
 
 Maintain a subject wiki in `wiki/`. Several source frames may contribute material.
-The receiving frame is identified by its immutable slug; this frame owns its graph.
+The receiving frame is identified by its immutable ID; this frame owns its graph.
 Develop the subject and editorial conventions with the user. Do not invent a
 taxonomy or seed research content when the frame opens.
 

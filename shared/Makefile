@@ -9,7 +9,7 @@ unexport prompt
 override PROMPT := $(value PROMPT)
 override PROMPT_FILE := $(value PROMPT_FILE)
 export PROMPT PROMPT_FILE
-export slug
+export id
 export PROVIDER
 override export BROWSER := $(value BROWSER)
 override export BROWSER_ENDPOINT := $(value BROWSER_ENDPOINT)
@@ -33,8 +33,8 @@ WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse
 GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login google-workspace-diagnose google-workspace-read google-workspace-spaces google-workspace-messages google-workspace-export google-workspace-download google-workspace-check google-workspace-test
 .PHONY: help ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
 help:
-	@echo 'config-check; frame-config-check slug=<slug>; frame-config-migrate slug=<slug> — validate or migrate configuration through the root Makefile'
-	@echo 'frame-messaging slug=<slug> [ENABLED=true|false] — inspect messaging or change it for a closed frame'
+	@echo 'config-check; frame-config-check id=<id>; frame-config-migrate id=<id> — validate or migrate configuration through the root Makefile'
+	@echo 'frame-messaging id=<id> [ENABLED=true|false] — inspect messaging or change it for a closed frame'
 	@echo 'provider-models [PROVIDER=name] — list available chat models from Pi'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
 	@echo 'ask reason twitter — fresh independent consultations, no local tools or frame context'

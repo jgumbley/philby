@@ -82,18 +82,18 @@ export class Frame {
   private shellEnv!:NodeJS.ProcessEnv;
   private settingsUpdate:Promise<unknown>=Promise.resolve();
   private readonly makefiles: Record<string,string>;
-  private constructor(readonly name: string, readonly models: Models) {
-    this.makefiles={shared:join(root,'shared','Makefile'),frame:join(paths(name).tools,'Makefile')};
+  private constructor(readonly id: string, readonly models: Models) {
+    this.makefiles={shared:join(root,'shared','Makefile'),frame:join(paths(id).tools,'Makefile')};
   }
   private tools() {
-    return Object.fromEntries(Object.entries(this.makefiles).map(([name,file])=>[name,readFileSync(file,'utf8')]));
+    return Object.fromEntries(Object.entries(this.makefiles).map(([label,file])=>[label,readFileSync(file,'utf8')]));
   }
-  static async open(name: string, models: Models, model: ModelReference | (()=>ModelReference), environment?:NodeJS.ProcessEnv) {
-    const p = new Frame(name,models);
-    p.release = lock(name);
+  static async open(id: string, models: Models, model: ModelReference | (()=>ModelReference), environment?:NodeJS.ProcessEnv) {
+    const p = new Frame(id,models);
+    p.release = lock(id);
     try {
-      const dirs = prepare(name);
-      p.shellEnv=environment ?? frameEnvironment(dirs.tools,name,framesRoot);
+      const dirs = prepare(id);
+      p.shellEnv=environment ?? frameEnvironment(dirs.tools,id,framesRoot);
       let savedSettings=readFrameSettings(dirs.tools);
       p.messagingEnabled=savedSettings?.messaging ?? true;
       const guidance=readFileSync(join(root,'FRAME.md'),'utf8');
@@ -101,14 +101,14 @@ export class Frame {
       const settings=harnessSettings();
       p.tools();
       const boot=existsSync(join(dirs.tools,'BOOT.md')) ? readFileSync(join(dirs.tools,'BOOT.md'),'utf8').trim() : '';
-      p.store = new Store(name);
+      p.store = new Store(id);
       p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:p.shellEnv});
       const registry = createRegistry(); registry.install(CodingTools);
       registry.install(defineExtension({name:'philby', tasks:[Startup], sections:[
-        section('frame', () => `Your frame is ${name}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.${p.messaging ? '' : ' Messaging is disabled for this frame. Do not send or receive frame messages or reports, or inspect updates.'}`),
+        section('frame', () => `Your frame is ${id}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.${p.messaging ? '' : ' Messaging is disabled for this frame. Do not send or receive frame messages or reports, or inspect updates.'}`),
         section('frame-guidance', () => guidance || undefined),
         section('frame-scope', () => scope || undefined),
-        ...Object.entries(p.makefiles).map(([name,file])=>section(`${name}-tools`,()=>{
+        ...Object.entries(p.makefiles).map(([label,file])=>section(`${label}-tools`,()=>{
           let source: string;
           try {source=readFileSync(file,'utf8');}
           catch(error) {p.onError(error);source=`ERROR reading Makefile: ${String(error)}`;}
@@ -137,7 +137,7 @@ export class Frame {
       const thinkingLevel=savedSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
       await p.conversation.configure({model:selected,thinkingLevel:thinkingLevel ?? null},ctx);
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
-      p.server = await listen(name, c => p.operation(c));
+      p.server = await listen(id, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
       p.boot=!!boot || startup;
       await p.tick();
@@ -150,7 +150,7 @@ export class Frame {
   private updateSettings(change:(current:FrameSettings)=>FrameSettings) {
     const update=this.settingsUpdate.then(async()=>{
       if(this.closing) throw Error('Frame is closing');
-      const directory=paths(this.name).tools;
+      const directory=paths(this.id).tools;
       const current=readFrameSettings(directory);
       if(!current) throw Error('Missing frame.env');
       const next=change(current);
@@ -171,9 +171,9 @@ export class Frame {
   }
   async operation(c: Command): Promise<unknown> {
     if (this.closing) throw Error('Frame is closing');
-    if(!this.messaging && ['send','receive','updates'].includes(c.op)) throw Error(`Messaging is disabled for frame ${this.name}`);
+    if(!this.messaging && ['send','receive','updates'].includes(c.op)) throw Error(`Messaging is disabled for frame ${this.id}`);
     switch(c.op) {
-      case 'status': return {slug:this.name,pid:process.pid,messaging:this.messaging, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.messaging ? this.store.updates() : [], work:await this.harness.inspect(ctx)};
+      case 'status': return {id:this.id,pid:process.pid,messaging:this.messaging, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.messaging ? this.store.updates() : [], work:await this.harness.inspect(ctx)};
       case 'model': {
         const errors=c.modelId===undefined?await refreshModels(this.models):[];
         if(c.modelId !== undefined) {
@@ -200,7 +200,7 @@ export class Frame {
       }
       case 'receive': this.store.accept(c.envelope as Envelope); return {persisted:true};
       case 'send': {
-        const e = envelope(this.name,String(c.to),String(c.content ?? ''),{...(c.id ? {id:String(c.id)} : {}),kind:c.kind === 'update' ? 'update' : 'input',mode:c.mode === 'steer' ? 'steer' : 'followUp'});
+        const e = envelope(this.id,String(c.to),String(c.content ?? ''),{...(c.id ? {id:String(c.id)} : {}),kind:c.kind === 'update' ? 'update' : 'input',mode:c.mode === 'steer' ? 'steer' : 'followUp'});
         const receiving = new Store(e.to);
         try { receiving.accept(e); return {accepted:e.id}; }
         finally { receiving.close(); }
@@ -283,13 +283,13 @@ export class Frame {
         try { await this.harness?.close(ctx); }
         finally {
           try {
-            if(this.boot) await promisify(execFile)('make',['--no-print-directory','-C',paths(this.name).tools,'close'],{env:this.shellEnv,timeout:60000});
+            if(this.boot) await promisify(execFile)('make',['--no-print-directory','-C',paths(this.id).tools,'close'],{env:this.shellEnv,timeout:60000});
           }
           finally {
             try { await this.env?.cleanup(ctx); }
             finally {
               this.store?.close();
-              rmSync(paths(this.name).socket,{force:true});
+              rmSync(paths(this.id).socket,{force:true});
               this.release();this.onClose?.();
             }
           }
@@ -300,22 +300,22 @@ export class Frame {
   }
 }
 
-export async function migrateFrameSettings(name:string) {
-  if(!existsSync(join(paths(name).state,'durable.sqlite'))) throw Error(`Frame ${name} has no saved conversation; open it to initialize settings`);
-  const release=lock(name);
+export async function migrateFrameSettings(id:string) {
+  if(!existsSync(join(paths(id).state,'durable.sqlite'))) throw Error(`Frame ${id} has no saved conversation; open it to initialize settings`);
+  const release=lock(id);
   try {
-    const directory=paths(name).tools;
-    if(readFrameSettings(directory)) return {slug:name,migrated:false};
-    const database=join(paths(name).state,'durable.sqlite');
-    if(!existsSync(database)) throw Error(`Frame ${name} has no saved conversation; open it to initialize settings`);
+    const directory=paths(id).tools;
+    if(readFrameSettings(directory)) return {id,migrated:false};
+    const database=join(paths(id).state,'durable.sqlite');
+    if(!existsSync(database)) throw Error(`Frame ${id} has no saved conversation; open it to initialize settings`);
     const harness=await Harness.open(await openNodeSqliteStorage(database),{models:createModels(),registry:createRegistry()},ctx);
     try {
       const conversation=await harness.conversation(ROOT_CONVERSATION_ID,ctx);
-      if(!conversation) throw Error(`Frame ${name} has no saved conversation`);
+      if(!conversation) throw Error(`Frame ${id} has no saved conversation`);
       const saved=await harness.snapshot(AgentDoc,conversation.id,ctx);
-      if(!saved?.model) throw Error(`Frame ${name} has no saved model`);
+      if(!saved?.model) throw Error(`Frame ${id} has no saved model`);
       writeFrameSettings(directory,{model:saved.model,messaging:true,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
-      return {slug:name,migrated:true};
+      return {id,migrated:true};
     } finally {await harness.close(ctx);}
   } finally {release();}
 }

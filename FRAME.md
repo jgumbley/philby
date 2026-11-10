@@ -44,17 +44,17 @@ Frame messages and passive reports require messaging enabled for both frames.
 If your frame context says messaging is disabled, do not send messages or
 reports or inspect updates. Memory remains available.
 
-Use `make -C "$PHILBY_ROOT" frame-send slug=receiving-frame from="$PHILBY_FRAME"
-REQUEST_ID=stable-id PROMPT_FILE=/absolute/path/to/message` to send work. The slug
+Use `make -C "$PHILBY_ROOT" frame-send id=receiving-frame from="$PHILBY_FRAME"
+REQUEST_ID=stable-id PROMPT_FILE=/absolute/path/to/message` to send work. The ID
 identifies the receiving frame. Reuse the request ID when retrying the same
 message. Acceptance means the receiving mailbox has persisted it, not that the
 work is complete.
 
-Use `frame-report slug=receiving-frame from="$PHILBY_FRAME"` to record meaningful
+Use `frame-report id=receiving-frame from="$PHILBY_FRAME"` to record meaningful
 changes, blockers and decisions in that frame without triggering a turn.
 
 Persist useful memory with `make -C "$PHILBY_ROOT" frame-memory
-slug="$PHILBY_FRAME" FIELD=notes PROMPT_FILE=/absolute/path/to/notes`. Other fields
+id="$PHILBY_FRAME" FIELD=notes PROMPT_FILE=/absolute/path/to/notes`. Other fields
 are `responsibilities`, `decisions`, `outstanding` and `sources`. Use memory for
 learned facts, decisions and working context. Keep the standing remit in
 `SCOPE.md`; do not duplicate it in memory. Keep memory separate from transcript
