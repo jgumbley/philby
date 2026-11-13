@@ -97,7 +97,7 @@ help:
 	@echo 'Inputs: FIELD=, MARK=1, ACTIVE=1, PLAN=...; TYPE selects a creation recipe'
 	@echo 'Prompts: PROMPT_FILE=path, prompt=..., or stdin.'
 	@echo 'Plan mode: frame-plan shows status; frame-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'
-	@echo 'New session: frame-new-session starts a fresh transcript, preserving files, tools, memory and archived history'
+	@echo 'New session: frame-new-session cancels all work and starts a fresh context, preserving files, tools, memory and archived history'
 	@echo 'frame-capture ALL=1 — include archived entries from before /new in chronological order'
 	@echo 'window deps build check test digest ingest cleanup; shared: ask reason twitter'
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'

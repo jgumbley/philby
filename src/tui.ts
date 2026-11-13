@@ -158,7 +158,7 @@ export async function startTui(frame:Frame,quit:()=>Promise<void>) {
       if(command==='/close') {await frame.close();return;}
       if(command==='/model') {await chooseModel();return;}
       if(command==='/stop') await frame.operation({op:'stop'});
-      else if(command==='/help') panel=`/model — choose a model for this frame\n/memory [field] — inspect or edit saved memory\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — start a fresh session, preserving files, tools, memory and archived history\n/tools${frame.messaging?' · /updates · /send id message · /report id message':''}\n/steer message · /stop · /close · /quit — quit all frames after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.`;
+      else if(command==='/help') panel=`/model — choose a model for this frame\n/memory [field] — inspect or edit saved memory\n/plan · /plan on · /plan off [plan] — read-only plan mode: research and present a plan before editing\n/new — cancel all work and start a fresh session, preserving files, tools, memory and archived history\n/tools${frame.messaging?' · /updates · /send id message · /report id message':''}\n/steer message · /stop · /close · /quit — quit all frames after y/n confirmation\nEnter sends; Shift-Enter inserts a newline. Ctrl-O expands tool output.`;
       else if(command==='/memory') {
         const memory=await frame.operation({op:'memory'}) as Record<string,string>;
         if(rest && rest in memory) {editor.setText(`/save ${rest}\n${memory[rest]}`);panel=`Editing ${rest}. Enter saves; Shift-Enter adds lines.`;render();return;}
@@ -174,7 +174,9 @@ export async function startTui(frame:Frame,quit:()=>Promise<void>) {
         else throw Error(`Invalid /plan argument: ${rest}. Use /plan, /plan on, or /plan off [plan]`);
       } else if(command==='/new') {
         if(rest) throw Error(`/new takes no arguments; got: ${rest}`);
-        panel=JSON.stringify(await frame.operation({op:'new'}),null,2);
+        panel='Cancelling all work…';render();
+        await frame.operation({op:'new'});
+        panel='All work cancelled. Fresh session started.';
       } else if(command==='/tools') panel=JSON.stringify(await frame.operation({op:command.slice(1)}),null,2);
       else if(command==='/updates') panel=JSON.stringify(await frame.operation({op:'updates',mark:true}),null,2);
       else if(command==='/send' || command==='/report') {

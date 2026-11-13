@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
-import { createRegistry, Harness, InboxDoc, ROOT_CONVERSATION_ID } from '@earendil-works/pi-durable';
+import { createRegistry, Harness, InboxDoc, ROOT_CONVERSATION_ID, type SubmissionDraft } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 const directory=mkdtempSync(join(tmpdir(),'philby-test-'));
 process.env.PHILBY_ROOT=directory;process.env.PHILBY_FRAMES_DIR=join(directory,'frames');
@@ -619,7 +619,7 @@ test('disabled messaging rejects messages and reports through live operations an
     assert.deepEqual(on.store.pending(),[]);
   } finally {await off.close();await on.close();}
 });
-test('disabled messaging retains pending work and reports without delivering or injecting them until reenabled',async()=>{
+test('disabled messaging retains reports and allows cancelling pending work with a new session',async()=>{
   const name='messaging-retained',tools=prepare(name).tools;
   const original=await Frame.open(name,fixture().models,model);
   const id=original.conversation.id;
@@ -649,31 +649,33 @@ test('disabled messaging retains pending work and reports without delivering or 
     assert.equal(f.faux.state.callCount,0);
     assert.equal((await off.harness.snapshot(Memory,id,ctx))?.notes,'retained independent memory');
     await assert.rejects(off.operation({op:'updates',mark:true}),/messaging.*disabled/i);
-    await assert.rejects(off.operation({op:'new'}),/pending delivery/);
+    await off.operation({op:'new'});
     assert.deepEqual(off.store.updates(),[{...oldReport,seen:false}]);
     assert.equal((await (await off.conversation.submit({type:'input',content:'direct request'},ctx)).wait(ctx)).status,'done');
-    assert.deepEqual(off.store.pending(),[input,report]);
+    assert.deepEqual(off.store.pending(),[report]);
   } finally {await off.close();}
   writeFrameSettings(tools,{...readFrameSettings(tools)!,messaging:true});
   const resumedFixture=fixture([context=>{
     assert.ok(JSON.stringify(context).includes(oldReport.content));
     assert.ok(JSON.stringify(context).includes(report.content));
-    return fauxAssistantMessage('pending work delivered');
+    return fauxAssistantMessage('retained reports available');
   }]);
   const resumed=await Frame.open(name,resumedFixture.models,model);
   try {
     await resumed.conversation.waitForIdle(ctx);
     assert.equal(resumed.conversation.id,id);
     assert.deepEqual(resumed.store.pending(),[]);
-    assert.equal(resumedFixture.faux.state.callCount,1);
+    assert.equal(resumedFixture.faux.state.callCount,0);
     assert.deepEqual(resumed.store.updates(),[{...oldReport,seen:false},{...report,seen:false}]);
+    await resumed.operation({op:'input',content:'fresh request with reports'});
+    await resumed.conversation.waitForIdle(ctx);
     await resumed.operation({op:'receive',envelope:input});
     await resumed.operation({op:'receive',envelope:report});
     await resumed.tick();
     await resumed.conversation.waitForIdle(ctx);
     assert.equal(resumedFixture.faux.state.callCount,1);
     const history=(await resumed.conversation.context(ctx)).messages;
-    assert.equal(history.filter(m=>m.role==='user' && JSON.stringify(m.content).includes(input.content)).length,1);
+    assert.equal(history.filter(m=>m.role==='user' && JSON.stringify(m.content).includes(input.content)).length,0);
   } finally {await resumed.close();}
 });
 test('model and thinking selection preserve disabled messaging across reopening',async()=>{
@@ -1031,24 +1033,39 @@ test('new session starts fresh context while preserving memory and history',asyn
     await (await p.conversation.submit({type:'input',content:'second question'},ctx)).wait(ctx);
   }finally{await p.close();}
 });
-test('new session rejects while work is active',async()=>{
+test('new session cancels active tools and queued follow-ups and steering',async()=>{
   const releaseFile=join(directory,'new-release');
   const effectFile=join(directory,'new-effect');
   const f=fixture([
     fauxAssistantMessage([
       fauxToolCall('bash',{command:`echo started >> '${effectFile}'; while [ ! -f '${releaseFile}' ]; do sleep .02; done; echo finished >> '${effectFile}'`})
     ],{stopReason:'toolUse'}),
-    fauxAssistantMessage('work done')
+    fauxAssistantMessage('fresh work done')
   ]);
   const p=await Frame.open('new-busy',f.models,model);
   try {
-    const submission=await p.conversation.submit({type:'input',content:'slow work'},ctx);
+    const submission=await p.conversation.submit({type:'input',content:'slow work',requestId:'active-before-reset'},ctx);
     await until(()=>existsSync(effectFile));
-    await assert.rejects(p.operation({op:'new'}),/Cannot start a new session while work is active/);
+    const followUp=await p.conversation.submit({type:'input',content:'old follow-up',requestId:'follow-up-before-reset',whenBusy:'followUp'},ctx);
+    const steering=await p.conversation.submit({type:'input',content:'old steering',requestId:'steering-before-reset',whenBusy:'steer'},ctx);
+    assert.deepEqual(await request(p.id,{op:'new'}),{reset:true});
+    for(const pending of [submission,followUp,steering]) {
+      const result=await pending.wait(ctx);
+      assert.ok(result.status==='unanswered');
+      assert.equal(result.reason,'aborted');
+    }
     writeFileSync(releaseFile,'go');
-    await submission.wait(ctx);
-    await p.operation({op:'new'});
+    assert.equal(readFileSync(effectFile,'utf8'),'started\n');
+    assert.equal((await p.harness.inspect(ctx)).tasks.length,0);
+    assert.deepEqual((await p.operation({op:'capture'}) as any[]).map(entry=>entry.kind),['pi.reset']);
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:''});
+    await p.operation({op:'input',content:'fresh work'});
+    await p.conversation.waitForIdle(ctx);
+    const current=JSON.stringify(await p.operation({op:'capture'}));
+    assert.match(current,/fresh work done/);
+    assert.doesNotMatch(current,/slow work|old follow-up|old steering/);
+    assert.equal(readFileSync(effectFile,'utf8'),'started\n');
+    assert.equal(f.faux.state.callCount,2);
   }finally{await p.close();}
 });
 test('new session persists across frame reopen',async()=>{
@@ -1070,33 +1087,113 @@ test('new session persists across frame reopen',async()=>{
     assert.ok(texts.includes('new question'));
   }finally{await p.close();}
 });
-test('new session preserves queued work, pending deliveries and request identities',async()=>{
-  const f=fixture([fauxAssistantMessage('queued done'),fauxAssistantMessage('delivery done')]);
-  const p=await Frame.open('new-queued',f.models,model);
+test('new session cancels queued inputs and pending deliveries while preserving request identities and reports',async()=>{
+  const f=fixture([fauxAssistantMessage('fresh done'),fauxAssistantMessage('reopened done')]);
+  let p=await Frame.open('new-queued',f.models,model);
+  const message=envelope('sender','new-queued','delivery before reset',{id:'stable-reset-delivery'});
+  const report=envelope('sender','new-queued','retained report',{id:'stable-reset-report',kind:'update'});
+  let queuedId:number;
   try {
     await p.conversation.commit(async tx=>{
       const inbox=await tx.doc(InboxDoc,p.conversation.id);
       const submission=await tx.createSubmission({conversationId:p.conversation.id,type:'input',status:'queued',requestId:'queued-before-reset'});
+      queuedId=submission.id;
       inbox.items.push({id:submission.id,mode:'followUp',content:'queued before reset'});
     },ctx);
-    await assert.rejects(p.operation({op:'new'}),/work is (queued|active)/);
+    p.store.accept(message);
+    p.store.accept(report);
+    await p.operation({op:'new'});
     await p.tick();
     assert.equal(f.faux.state.callCount,0);
-    await (await p.conversation.submit({type:'continue'},ctx)).wait(ctx);
-    assert.ok(JSON.stringify(await p.operation({op:'capture'})).includes('queued before reset'));
-    const message=envelope('sender','new-queued','delivery before reset',{id:'stable-reset-delivery'});
+    assert.deepEqual(p.store.pending(),[]);
+    assert.deepEqual(p.store.updates(),[{...report,seen:false}]);
+    const retried=await p.conversation.submit({type:'input',content:'queued before reset',requestId:'queued-before-reset'},ctx);
+    assert.equal(retried.id,queuedId!);
+    const result=await retried.wait(ctx);
+    assert.ok(result.status==='unanswered');
+    assert.equal(result.reason,'aborted');
     p.store.accept(message);
-    await assert.rejects(p.operation({op:'new'}),/pending delivery|work is (queued|active)/);
+    assert.throws(()=>p.store.accept({...message,content:'conflicting retry'}),/Request ID conflict/);
     await p.tick();
-    await p.conversation.waitForIdle(ctx);
-    assert.ok(JSON.stringify(await p.operation({op:'capture'})).includes('delivery before reset'));
-    await p.operation({op:'new'});
-    p.store.accept(message);
-    await p.tick();
-    assert.equal(f.faux.state.callCount,2);
+    assert.equal(f.faux.state.callCount,0);
     assert.deepEqual((await p.operation({op:'capture'}) as any[]).map(entry=>entry.kind),['pi.reset']);
-    assert.ok(JSON.stringify(await p.operation({op:'capture',all:true})).includes('delivery before reset'));
+    await p.operation({op:'input',content:'fresh after cancellation'});
+    await p.conversation.waitForIdle(ctx);
+    assert.equal(f.faux.state.callCount,1);
   }finally{await p.close();}
+  p=await Frame.open('new-queued',f.models,model);
+  try {
+    p.store.accept(message);
+    await p.tick();
+    const retried=await p.conversation.submit({type:'input',content:'queued before reset',requestId:'queued-before-reset'},ctx);
+    assert.equal(retried.id,queuedId!);
+    assert.equal((await retried.wait(ctx)).status,'unanswered');
+    assert.equal(f.faux.state.callCount,1);
+    assert.deepEqual(p.store.updates(),[{...report,seen:false}]);
+    await p.operation({op:'input',content:'fresh after reopen'});
+    await p.conversation.waitForIdle(ctx);
+    assert.equal(f.faux.state.callCount,2);
+    const current=JSON.stringify(await p.operation({op:'capture'}));
+    assert.match(current,/fresh after cancellation/);
+    assert.match(current,/fresh after reopen/);
+    assert.doesNotMatch(current,/queued before reset|delivery before reset/);
+  }finally{await p.close();}
+});
+test('new session cancels the running opening checklist',async()=>{
+  const dirs=prepare('new-startup');
+  writeFileSync(join(dirs.tools,'BOOT.md'),'old opening checklist');
+  writeFileSync(join(dirs.tools,'Makefile'),'close:\n\t@true\n');
+  const f=fixture([fauxAssistantMessage('opening '.repeat(100)),fauxAssistantMessage('fresh')],10);
+  const p=await Frame.open('new-startup',f.models,model);
+  try {
+    await until(()=>f.faux.state.callCount===1);
+    const startup=(await p.harness.inspect(ctx)).tasks.find(task=>task.record.kind==='philby.startup');
+    assert.ok(startup);
+    await p.operation({op:'new'});
+    const canceled=await p.harness.getTask(startup.record.id,ctx);
+    assert.ok(canceled?.state.status==='terminal');
+    assert.equal(canceled.state.outcome.status,'aborted');
+    assert.equal((await p.harness.inspect(ctx)).tasks.length,0);
+    assert.deepEqual((await p.operation({op:'capture'}) as any[]).map(entry=>entry.kind),['pi.reset']);
+    await p.operation({op:'input',content:'fresh request'});
+    await p.conversation.waitForIdle(ctx);
+    assert.equal(f.faux.state.callCount,2);
+    assert.doesNotMatch(JSON.stringify(await p.operation({op:'capture'})),/old opening checklist/);
+  }finally{await p.close();}
+});
+test('new session waits for in-flight mailbox delivery and admits later input into fresh context',{timeout:10000},async(t)=>{
+  const f=fixture([fauxAssistantMessage('first response'),fauxAssistantMessage('second response'),fauxAssistantMessage('third response')]);
+  const p=await Frame.open('new-delivery-race',f.models,model);
+  const submit=p.conversation.submit.bind(p.conversation);
+  let entered=false;
+  let release!:()=>void;
+  const released=new Promise<void>(resolve=>{release=resolve;});
+  try {
+    t.mock.method(p.conversation,'submit',async(draft:SubmissionDraft,context:typeof ctx)=>{
+      if(draft.requestId==='message:reset-in-flight') {
+        entered=true;
+        await released;
+      }
+      return submit(draft,context);
+    });
+    p.store.accept(envelope('sender',p.id,'in-flight before reset',{id:'reset-in-flight'}));
+    p.store.accept(envelope('sender',p.id,'pending before reset',{id:'reset-pending'}));
+    const ticking=p.tick();
+    await until(()=>entered);
+    let finished=false;
+    const reset=p.operation({op:'new'}).then(result=>{finished=true;return result;});
+    const fresh=p.operation({op:'input',content:'input after reset request',id:'reset-fresh-input'});
+    await Promise.resolve();
+    assert.equal(finished,false);
+    release();
+    await Promise.all([ticking,reset,fresh]);
+    await p.conversation.waitForIdle(ctx);
+    assert.deepEqual(p.store.pending(),[]);
+    const current=JSON.stringify(await p.operation({op:'capture'}));
+    assert.match(current,/input after reset request/);
+    assert.doesNotMatch(current,/in-flight before reset|pending before reset/);
+    assert.equal((await p.harness.inspect(ctx)).tasks.length,0);
+  }finally{release();t.mock.restoreAll();await p.close();}
 });
 test('CLI plan-set validates ACTIVE and preserves plan on empty exit',async()=>{
   const f=fixture([fauxAssistantMessage('ok')]);

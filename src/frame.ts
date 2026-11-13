@@ -81,6 +81,7 @@ export class Frame {
   get messaging() {return this.messagingEnabled;}
   private shellEnv!:NodeJS.ProcessEnv;
   private settingsUpdate:Promise<unknown>=Promise.resolve();
+  private admissions:Promise<unknown>=Promise.resolve();
   private readonly makefiles: Record<string,string>;
   private constructor(readonly id: string, readonly models: Models) {
     this.makefiles={shared:join(root,'shared','Makefile'),frame:join(paths(id).tools,'Makefile')};
@@ -137,11 +138,11 @@ export class Frame {
       const thinkingLevel=savedSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
       await p.conversation.configure({model:selected,thinkingLevel:thinkingLevel ?? null},ctx);
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
-      p.server = await listen(id, c => p.operation(c));
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
       p.boot=!!boot || startup;
       await p.tick();
       if(boot && !startup) await p.conversation.commit(tx=>tx.createTask(Startup,{prompt:boot},{ownership:{kind:'conversation'},background:true}),ctx);
+      p.server = await listen(id, c => p.operation(c));
       p.harness.resume();
       if(p.messaging) p.timer = setInterval(() => { void p.tick().catch(p.onError); },500);
       return p;
@@ -169,6 +170,11 @@ export class Frame {
     this.settingsUpdate=update.catch(()=>{});
     return update;
   }
+  private admit<T>(operation:()=>Promise<T>) {
+    const admitted=this.admissions.then(operation);
+    this.admissions=admitted.catch(()=>{});
+    return admitted;
+  }
   async operation(c: Command): Promise<unknown> {
     if (this.closing) throw Error('Frame is closing');
     if(!this.messaging && ['send','receive','updates'].includes(c.op)) throw Error(`Messaging is disabled for frame ${this.id}`);
@@ -195,8 +201,10 @@ export class Frame {
       }
       case 'input': {
         const content = String(c.content ?? ''); if (!content.trim()) throw Error('Empty prompt');
-        const sub = await this.conversation.submit({type:'input',content,requestId:c.id ? String(c.id) : undefined,whenBusy:c.mode === 'steer' ? 'steer' : 'followUp'},ctx);
-        return {accepted:sub.id};
+        return this.admit(async()=>{
+          const sub = await this.conversation.submit({type:'input',content,requestId:c.id ? String(c.id) : undefined,whenBusy:c.mode === 'steer' ? 'steer' : 'followUp'},ctx);
+          return {accepted:sub.id};
+        });
       }
       case 'receive': this.store.accept(c.envelope as Envelope); return {persisted:true};
       case 'send': {
@@ -238,21 +246,20 @@ export class Frame {
         },ctx);
         return saved;
       }
-      case 'new': {
+      case 'new': return this.admit(async()=>{
+        for(const message of this.store.pending()) if(message.kind==='input') this.store.placed(message);
+        await this.conversation.abort(ctx,{background:true});
         await this.conversation.commit(async tx => {
-          const live = await tx.doc(LiveDoc, this.conversation.id);
-          if(live.run) throw Error('Cannot start a new session while work is active. Wait for current work to complete or stop it with /stop.');
           const inbox = await tx.doc(InboxDoc, this.conversation.id);
-          if(inbox.items.length > 0) throw Error('Cannot start a new session while work is queued. Wait for queued work to complete or stop it with /stop.');
-          const pending = this.store.pending().filter(e => e.kind === 'input');
-          if(pending.length > 0) throw Error(`Cannot start a new session while messages are pending delivery. ${this.messaging ? 'Wait for delivery or stop the frame.' : 'Enable messaging and reopen the frame to deliver them.'}`);
+          for(const item of inbox.items) tx.settleSubmission(item.id,{status:'unanswered',reason:'aborted'});
+          inbox.items=[];
           const plan = await tx.doc(PlanMode, this.conversation.id);
           plan.active = false;
           plan.plan = '';
           await tx.appendEntry(ResetEntry, this.conversation.id, {head:'self'});
         },ctx);
         return {reset:true};
-      }
+      });
       case 'updates': return this.store.updates(!!c.mark);
       case 'tools': return this.tools();
       case 'capture': return capture(this.conversation,c.all===true);
@@ -262,7 +269,7 @@ export class Frame {
   tick() {
     if (this.closing || !this.messaging) return Promise.resolve();
     if(this.ticking) return this.ticking;
-    this.ticking = this.pump().finally(() => {this.ticking=undefined;});
+    this.ticking = this.admit(()=>this.pump()).finally(() => {this.ticking=undefined;});
     return this.ticking;
   }
   private async pump() {
@@ -278,7 +285,7 @@ export class Frame {
     this.closure=(async()=>{
       clearInterval(this.timer);
       this.server?.close();
-      try { await this.ticking; }
+      try { await this.admissions; await this.ticking; }
       finally {
         try { await this.harness?.close(ctx); }
         finally {

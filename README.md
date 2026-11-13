@@ -110,7 +110,7 @@ make frame-messaging id=research ENABLED=false
 make frame id=research
 ```
 
-The first command reports the saved setting and, when running supported code, the active setting. The setter takes the frame's lifetime lock and preserves its other settings. It refuses to change a running frame. Set `ENABLED=true` while closed to re-enable messaging. Existing mailbox records and reports are retained. Requests already being accepted when the setting changes may finish acceptance. Undelivered mailbox items wait until messaging is re-enabled; inputs already submitted to Durable retain their normal recovery behavior. A fresh-session reset still refuses pending mailbox work. Disabling messaging does not erase messages already present in conversation history, and it does not restrict native shell or filesystem access.
+The first command reports the saved setting and, when running supported code, the active setting. The setter takes the frame's lifetime lock and preserves its other settings. It refuses to change a running frame. Set `ENABLED=true` while closed to re-enable messaging. Existing mailbox records and reports are retained. Requests already being accepted when the setting changes may finish acceptance. Undelivered mailbox items wait until messaging is re-enabled; inputs already submitted to Durable retain their normal recovery behavior. `/new` also cancels pending input messages while messaging is disabled, retaining passive reports and request IDs. Disabling messaging does not erase messages already present in conversation history, and it does not restrict native shell or filesystem access.
 
 `/model` updates `frame.env` atomically before applying the choice to the existing conversation. To save a thinking preference on a running frame, use `make frame-thinking id=research LEVEL=high`; `LEVEL=default` clears that preference. Edit `frame.env` directly only while the frame is closed, then reopen it. Durable retains the active projection of these settings alongside its conversation state. The file is authoritative when reopening; conversation history, memory, plans, mailbox records and queued work remain in their existing stores.
 
@@ -205,7 +205,7 @@ Enter submits, Shift-Enter inserts a newline, and follow-ups queue while work is
 | `/send id message` | Queue input in the receiving frame |
 | `/report id message` | Record a passive update in the receiving frame |
 | `/plan`, `/plan on`, `/plan off [plan]` | Read-only plan mode: research and present a plan before editing |
-| `/new` | Start a fresh session, preserving files, tools, memory and archived history |
+| `/new` | Cancel all work and start a fresh session, preserving files, tools, memory and archived history |
 | `/close`, `/quit` | Suspend this frame or confirm closing the workspace |
 
 Memory fields are `responsibilities`, `notes`, `decisions`, `outstanding` and `sources`. They live separately from the transcript and enter model requests after compaction. `SCOPE.md` is the standing definition of the frame's remit; memory holds learned facts, decisions and working context. The existing `responsibilities` field and its saved contents remain available without copying the scope into it. Model changes preserve conversation, memory and queued work.
@@ -221,7 +221,7 @@ printf '1. Step one\n2. Step two\n' | make frame-plan-set id=research ACTIVE=0
 
 `ACTIVE` must be exactly `0`, `1`, `true`, or `false`. A nonempty `PLAN` supplies the approved plan; otherwise use the usual `PROMPT_FILE`, `PROMPT`/`prompt`, then stdin precedence. Exiting without replacement text preserves any previously saved plan. Reads of explicit prompt files fail visibly if unavailable.
 
-`/new` starts a fresh model context in the existing Durable conversation while retaining prior transcript entries, files, tools, instructions, durable memory and model selection. Plan mode begins off with no approved plan in the fresh context. `/new` rejects while work is active, queued or awaiting mailbox delivery; it does not cancel work. Reopening preserves the fresh context. Add `ALL=1` to capture the full archived history in chronological order.
+`/new` starts a fresh model context in the existing Durable conversation while retaining prior transcript entries, files, tools, instructions, durable memory and model selection. Plan mode begins off with no approved plan in the fresh context. `/new` cancels active work, background tasks, queued prompts and input messages already awaiting mailbox delivery before resetting the context. Cancelled request IDs remain recorded so retries cannot revive discarded work. Passive reports are retained. Inputs received after cancellation begins belong to the fresh session. Reopening preserves the fresh context. Add `ALL=1` to capture the full archived history in chronological order.
 
 ```sh
 make frame-new-session id=research
