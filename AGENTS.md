@@ -9,7 +9,7 @@
 
 No code comments. Use deterministic providers, temporary stores and isolated tmux servers in tests.
 
-Read the Makefile and follow its delegated scripts for capability discovery; use `make digest` when needed. Agents can interpret targets directly. Do not add or maintain `make help` targets or duplicate target inventories, command usage or configuration in README files or frame notes: these copies drift. Keep frame notes limited to current work, decisions and unresolved issues. Use `make check` and `make test` for application changes. Run the affected module's checks and tests for module changes; `make check-all test-all` covers everything.
+Read the Makefile and follow its delegated scripts for capability discovery; use `make digest` when needed. Agents can interpret targets directly. Do not add or maintain `make help` targets or duplicate target inventories, command usage or configuration in README files or frame notes: these copies drift. Use `make lint` and `make test` for application changes. `make test` covers everything and will always be run last.
 
 
 Keep automated tests focused on Philby core behavior. Do not add tests for frame-specific agent responsibilities or workflows. Verify those manually through their Make targets.
