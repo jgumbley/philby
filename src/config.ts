@@ -29,6 +29,7 @@ function invocation(env:NodeJS.ProcessEnv) {
 export const invocationEnvironment=invocation(process.env);
 export const root=resolve(invocationEnvironment.PHILBY_ROOT || fileURLToPath(new URL('../../',import.meta.url)));
 export const piAgentDir=join(root,'.pi','agent');
+export const frameSettingKeys=['FRAME_MODEL','FRAME_THINKING_LEVEL','FRAME_MESSAGING','FRAME_MEMORY','FRAME_TOOL_SOURCES'];
 const instance=loadConfiguration([root],invocationEnvironment);
 
 function environment(values:NodeJS.ProcessEnv) {
@@ -51,7 +52,7 @@ applyEnvironment(instanceEnvironment);
 export function frameEnvironment(directory:string,id:string,framesRoot:string) {
   const loaded=loadConfiguration([root,directory],invocationEnvironment);
   const localKeys=loaded.files.filter(file=>!instance.files.includes(file)).flatMap(file=>Object.keys(parseEnv(readFileSync(file,'utf8'))));
-  const reserved=[...new Set(localKeys.filter(key=>key.startsWith('PHILBY_') || key==='PI_CODING_AGENT_DIR' || key==='FRAME_MODEL' || key==='FRAME_THINKING_LEVEL' || key==='FRAME_MESSAGING'))];
+  const reserved=[...new Set(localKeys.filter(key=>key.startsWith('PHILBY_') || key==='PI_CODING_AGENT_DIR' || frameSettingKeys.includes(key)))];
   if(reserved.length) throw Error(`Frame environment contains reserved keys: ${reserved.join(', ')}`);
   const values:NodeJS.ProcessEnv={...loaded.values,PHILBY_FRAME:id,PHILBY_FRAMES_DIR:framesRoot};
   delete values.id;

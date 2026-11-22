@@ -6,15 +6,15 @@ import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, r
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, hasApi, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
+import { createModels, fauxProvider, fauxAssistantMessage, fauxToolCall, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
-import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
-import { createRegistry, Harness, InboxDoc, ROOT_CONVERSATION_ID, type SubmissionDraft } from '@earendil-works/pi-durable';
-import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
+import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek';
+import { InboxDoc, type SubmissionDraft } from '@earendil-works/pi-durable';
 const directory=mkdtempSync(join(tmpdir(),'philby-test-'));
 process.env.PHILBY_ROOT=directory;process.env.PHILBY_FRAMES_DIR=join(directory,'frames');
 cpSync(new URL('../../.env.schema',import.meta.url),join(directory,'.env.schema'));
-writeFileSync(join(directory,'FRAME.md'),'shared-frame-guidance');
+const guidance=readFileSync(new URL('../../FRAME.md',import.meta.url),'utf8').trim();
+writeFileSync(join(directory,'FRAME.md'),guidance);
 cpSync(new URL('../../frame-types',import.meta.url),join(directory,'frame-types'),{recursive:true});
 mkdirSync(join(directory,'shared'));writeFileSync(join(directory,'shared','Makefile'),'help:\n\t@echo shared-tool\n');
 cpSync(new URL('../../shared/frame.env.schema',import.meta.url),join(directory,'shared','frame.env.schema'));
@@ -26,6 +26,13 @@ const model={provider:'test',modelId:'test'};
 function fixture(responses: Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0]=[fauxAssistantMessage('done')], speed=10000) {
   const faux=fauxProvider({provider:'test',models:[{id:'test'}],tokensPerSecond:speed});
   faux.setResponses(responses);const models=createModels();models.setProvider(faux.provider);return {models,faux};
+}
+function enableMessaging(...ids:string[]) {
+  for(const id of ids) {
+    const {tools}=paths(id);
+    mkdirSync(tools,{recursive:true});
+    writeFrameSettings(tools,{model,messaging:true});
+  }
 }
 async function until(fn:()=>Promise<boolean>|boolean) {for(let i=0;i<200;i++){if(await fn())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out');}
 function runCli(command:string,environment:NodeJS.ProcessEnv) {
@@ -83,9 +90,8 @@ test('reopening uses the saved model and history without evaluating the new-fram
 test('an unavailable new-frame default leaves no saved root conversation',async()=>{
   const configured=fixture();
   await assert.rejects(Frame.open('invalid-default',configured.models,()=>({provider:'missing',modelId:'unavailable'})),/Model unavailable: missing\/unavailable/);
-  const harness=await Harness.open(await openNodeSqliteStorage(join(paths('invalid-default').state,'durable.sqlite')),{models:configured.models,registry:createRegistry()},ctx);
-  try {assert.equal(await harness.conversation(ROOT_CONVERSATION_ID,ctx),undefined);}
-  finally{await harness.close(ctx);}
+  assert.equal(existsSync(join(paths('invalid-default').state,'durable.sqlite')),false);
+  assert.equal(existsSync(join(paths('invalid-default').tools,'frame.env')),false);
   const reopened=await Frame.open('invalid-default',configured.models,()=>model);
   try {assert.deepEqual((await reopened.conversation.agent(ctx)).model,model);}
   finally{await reopened.close();}
@@ -115,29 +121,6 @@ test('edited frame settings control reopening without replacing saved history or
     assert.equal(provider.state.callCount,1);
   } finally {await reopened.close();}
 });
-test('old saved frames seed schema settings from their exact saved agent without changing work',async()=>{
-  const f=fixture();
-  const p=await Frame.open('settings-migration',f.models,model);
-  const id=p.conversation.id;
-  await p.operation({op:'thinking',level:'high'});
-  await p.operation({op:'memory',field:'notes',content:'migration retains memory'});
-  assert.equal((await (await p.conversation.submit({type:'input',content:'migration retains history'},ctx)).wait(ctx)).status,'done');
-  const history=await p.operation({op:'capture'});
-  await p.close();
-  const tools=paths(p.id).tools;
-  rmSync(join(tools,'frame.env'));
-  rmSync(join(tools,'.env.schema'));
-  writeFileSync(join(tools,'SCOPE.md'),'edited migration scope');
-  const reopened=await Frame.open(p.id,f.models,()=>{throw Error('migration must not read DEFAULT_MODEL');});
-  try {
-    assert.equal(reopened.conversation.id,id);
-    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
-    assert.ok(existsSync(join(tools,'.env.schema')));
-    assert.equal(readFileSync(join(tools,'SCOPE.md'),'utf8'),'edited migration scope');
-    assert.deepEqual(await reopened.operation({op:'capture'}),history);
-    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'migration retains memory');
-  } finally {await reopened.close();}
-});
 test('closed frame settings migration needs no provider and preserves the saved conversation',async()=>{
   const f=fixture();
   const p=await Frame.open('settings-offline-migration',f.models,model);
@@ -151,8 +134,10 @@ test('closed frame settings migration needs no provider and preserves the saved 
   const tools=paths(p.id).tools;
   rmSync(join(tools,'frame.env'));
   rmSync(join(tools,'.env.schema'));
+  await assert.rejects(Frame.open(p.id,f.models,()=>{throw Error('migration must use the saved selection');}),/frame-config-migrate/);
+  assert.equal(existsSync(join(tools,'frame.env')),false);
   assert.deepEqual(await migrateFrameSettings(p.id),{id:p.id,migrated:true});
-  assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
+  assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
   const source=readFileSync(join(tools,'frame.env'),'utf8');
   assert.deepEqual(await migrateFrameSettings(p.id),{id:p.id,migrated:false});
   assert.equal(readFileSync(join(tools,'frame.env'),'utf8'),source);
@@ -216,7 +201,7 @@ test('a synchronization failure after publishing settings closes the frame and r
   try {
     await assert.rejects(p.operation({op:'thinking',level:'high'}),/saved but synchronization failed/);
     assert.equal(p.closing,true);
-    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
   } finally {
     sync.mock.restore();syncBuiltinESMExports();
     await p.close();
@@ -235,7 +220,7 @@ test('saved settings reconcile after a failed runtime projection',async t=>{
   try {
     await assert.rejects(p.operation({op:'thinking',level:'high'}),/injected projection failure/);
     assert.equal(p.closing,true);
-    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:true});
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
   } finally {configure.mock.restore();await p.close();}
   const reopened=await Frame.open(p.id,f.models,model);
   try {
@@ -254,7 +239,7 @@ test('concurrent frame setting updates serialize without losing model or thinkin
       p.operation({op:'thinking',level:'high'}),
       p.operation({op:'model',...model}),
     ]);
-    assert.deepEqual(readFrameSettings(paths(p.id).tools),{model,thinkingLevel:'high',messaging:true});
+    assert.deepEqual(readFrameSettings(paths(p.id).tools),{model,thinkingLevel:'high',messaging:false});
     assert.deepEqual((await p.conversation.agent(ctx)).model,model);
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
     assert.equal(provider.state.callCount,0);
@@ -401,65 +386,91 @@ test('compaction profiles follow model switches and reload when a frame reopens'
     if(previous===undefined)rmSync(settingsFile,{force:true});else writeFileSync(settingsFile,previous);
   }
 });
-test('Makefile sources reach the first provider request and refresh after tools without reopening',async()=>{
-  const dirs=prepare('live-tools');
-  assert.equal(readFileSync(join(dirs.tools,'SCOPE.md'),'utf8'),'');
-  const files={shared:join(directory,'shared','Makefile'),frame:join(dirs.tools,'Makefile')};
-  const originalShared=readFileSync(files.shared,'utf8');
-  const initial={shared:'help:\n\t@echo shared\nhidden-target:\n\t@printf "%s\\n" "$(value INPUT)"\n',frame:readFileSync(files.frame,'utf8')};
-  const updated={shared:'help:\n\t@echo shared\nnew-shared-target:\n\t@echo shared-ready\n',frame:'help:\n\t@echo frame\nnew-frame-target:\n\t@echo frame-ready\n'};
-  const providerModel=openrouterProvider().getModels().find(candidate=>candidate.id==='z-ai/glm-5.3');
-  assert.ok(providerModel && hasApi(providerModel,'openai-completions'));
-  const serialized=async(context:TranscriptContext)=>{
-    let payload:any,networkCalls=0;
-    const response=await streamSimple(providerModel,context,{
-      apiKey:'offline-test-placeholder',
-      fetch:async()=>{networkCalls++;throw Error('Network forbidden in source test');},
-      onPayload:value=>{payload=value;throw Error('Offline payload captured');}
-    }).result();
-    assert.equal(networkCalls,0);
-    assert.equal(response.errorMessage,'Offline payload captured');
-    assert.equal(payload.messages[0].role,'system');
-    assert.equal(typeof payload.messages[0].content,'string');
-    return payload.messages[0].content as string;
-  };
-  const verify=(system:string,sources:typeof initial)=>{
-    for(const name of ['shared','frame'] as const)assert.ok(system.includes(`Source: ${files[name]}\n\n${sources[name]}`));
-  };
+async function providerRequest(context:TranscriptContext) {
+  const providerModel=deepseekProvider().getModels().find(candidate=>candidate.compat?.supportsMidConvoSystemMessages);
+  assert.ok(providerModel);
+  type Payload = {messages:{role:string;content:string}[];tools:{function:{name:string}}[]};
+  let payload:Payload|undefined;
+  const response=await streamSimple(providerModel,context,{
+    apiKey:'offline-test-placeholder',
+    fetch:async()=>{throw Error('Network forbidden in provider request test');},
+    onPayload:value=>{payload=value as Payload;throw Error('Offline payload captured');}
+  }).result();
+  assert.equal(response.errorMessage,'Offline payload captured');
+  assert.ok(payload);
+  const system=payload.messages.filter(message=>message.role==='system').map(message=>message.content).join('\n\n');
+  const tools=payload.tools.map(tool=>tool.function.name).sort();
+  return {system,tools};
+}
+test('model-only frames send just the working convention and four native tools while building a local target',async()=>{
+  const requests:Awaited<ReturnType<typeof providerRequest>>[]=[];
+  const makefile='verify-local:\n\t@echo verified > result\n';
   const f=fixture([
     async context=>{
-      verify(await serialized(context),initial);
-      return fauxAssistantMessage(Object.entries(updated).map(([name,content])=>fauxToolCall('write',{path:files[name as keyof typeof files],content})),{stopReason:'toolUse'});
+      requests.push(await providerRequest(context));
+      return fauxAssistantMessage([fauxToolCall('write',{path:'Makefile',content:makefile})],{stopReason:'toolUse'});
     },
     async context=>{
-      const system=await serialized(context);verify(system,updated);
-      for(const name of ['shared','frame'] as const)assert.ok(!system.includes(`Source: ${files[name]}\n\n${initial[name]}`));
-      return fauxAssistantMessage('updated sources verified');
+      requests.push(await providerRequest(context));
+      return fauxAssistantMessage([fauxToolCall('bash',{command:'make verify-local'})],{stopReason:'toolUse'});
     },
     async context=>{
-      const system=await serialized(context);
-      assert.ok(system.includes(`Source: ${files.shared}\n\nERROR reading Makefile:`));
-      assert.match(system,/ENOENT/);
-      assert.ok(!system.includes(updated.shared));
-      assert.ok(system.includes(`Source: ${files.frame}\n\n${updated.frame}`));
-      return fauxAssistantMessage('missing source reported');
+      requests.push(await providerRequest(context));
+      return fauxAssistantMessage('finished');
     }
   ]);
-  writeFileSync(files.shared,initial.shared);
-  const p=await Frame.open('live-tools',f.models,model),errors:unknown[]=[];
-  p.onError=error=>errors.push(error);
+  const p=await Frame.open('minimal-context',f.models,model);
   try {
-    assert.equal(f.faux.state.callCount,0);
-    assert.equal((await (await p.conversation.submit({type:'input',content:'inspect and update tools'},ctx)).wait(ctx)).status,'done');
-    assert.equal(f.faux.state.callCount,2);
-    assert.deepEqual(await p.operation({op:'tools'}),updated);
-    for(const name of ['shared','frame'] as const)assert.equal(readFileSync(files[name],'utf8'),updated[name]);
-    rmSync(files.shared);
-    assert.equal((await (await p.conversation.submit({type:'input',content:'inspect tools again'},ctx)).wait(ctx)).status,'done');
-    assert.equal(f.faux.state.callCount,3);
-    assert.ok(errors.some(error=>String(error).includes(files.shared) && String(error).includes('ENOENT')));
-    await assert.rejects(p.operation({op:'tools'}),/ENOENT/);
-  }finally{writeFileSync(files.shared,originalShared);await p.close();}
+    const {tools}=paths(p.id);
+    assert.equal(readFileSync(join(tools,'frame.env'),'utf8'),'FRAME_MODEL="test/test"\n');
+    await p.operation({op:'memory',field:'notes',content:'stored outside the prompt'});
+    const result=await (await p.conversation.submit({type:'input',content:'build a target'},ctx)).wait(ctx);
+    assert.equal(result.status,'done',JSON.stringify(result));
+    assert.equal(readFileSync(join(tools,'result'),'utf8'),'verified\n');
+    assert.deepEqual(requests,Array(3).fill({system:guidance,tools:['bash','edit','read','write']}));
+    assert.doesNotMatch(guidance,/messaging|memory|browser|slides/i);
+    assert.deepEqual(await p.operation({op:'tools'}),{shared:readFileSync(join(directory,'shared','Makefile'),'utf8'),frame:makefile});
+  }finally{await p.close();}
+});
+test('reopening with selected sources and memory adds only their current references and populated fields',async()=>{
+  const name='selected-context',tools=prepare(name).tools;
+  const file=join(tools,'authoring.mk');
+  writeFileSync(file,'secret-target-body:\n\t@true\n');
+  writeFrameSettings(tools,{model,messaging:false,memory:true,toolSources:['frame/authoring.mk']});
+  const systems:string[]=[];
+  const capture=async(context:TranscriptContext)=>{
+    systems.push((await providerRequest(context)).system);
+    return fauxAssistantMessage('done');
+  };
+  const f=fixture([capture,capture,capture]);
+  let p=await Frame.open(name,f.models,model);
+  const submit=async()=>{
+    const result=await (await p.conversation.submit({type:'input',content:'check current settings'},ctx)).wait(ctx);
+    assert.equal(result.status,'done',JSON.stringify(result));
+  };
+  try {
+    await submit();
+    await p.operation({op:'memory',field:'notes',content:'populated memory'});
+    await submit();
+    await p.close();
+    writeFrameSettings(tools,{model,messaging:false,toolSources:['shared/Makefile']});
+    p=await Frame.open(name,f.models,model);
+    await submit();
+    assert.equal(systems.length,3);
+    for(const system of systems.slice(0,2)) {
+      assert.equal(system.split(file).length,2);
+      assert.doesNotMatch(system,/secret-target-body|shared-tool|responsibilities/);
+      assert.ok(!system.includes(join(directory,'shared','Makefile')));
+    }
+    assert.doesNotMatch(systems[0],/notes|populated memory/);
+    assert.match(systems[1],/populated memory/);
+    assert.ok(systems[2].includes(join(directory,'shared','Makefile')));
+    assert.ok(!systems[2].includes(file));
+    assert.doesNotMatch(systems[2],/populated memory|shared-tool/);
+    const stored=(await p.conversation.context(ctx)).messages.filter(message=>message.role==='system');
+    assert.ok(stored.some(message=>JSON.stringify(message.sections ?? {}).includes('populated memory')));
+    assert.equal((await p.harness.snapshot(Memory,p.conversation.id,ctx))?.notes,'populated memory');
+  }finally{await p.close();}
 });
 test('frame scope survives compaction and loads independently on reopening',async()=>{
   const a=prepare('instructions-a'),b=prepare('instructions-b');
@@ -467,20 +478,15 @@ test('frame scope survives compaction and loads independently on reopening',asyn
   writeFileSync(join(directory,'AGENTS.md'),'root-only-instructions');
   writeFileSync(join(a.tools,'SCOPE.md'),'alpha-only-instructions');
   writeFileSync(join(b.tools,'SCOPE.md'),'beta-only-instructions');
-  prepare('instructions-a');assert.equal(readFileSync(join(a.tools,'SCOPE.md'),'utf8'),'alpha-only-instructions');
-  const verify=(tools:string,expected:string,excluded:string[],guidance='shared-frame-guidance')=>async(context:TranscriptContext)=>{
-    const sections=Object.assign({},...context.messages.filter(m=>m.role==='system').map(m=>m.sections));
-    const system=JSON.stringify(sections);
-    for(const [name,file] of [['shared',join(directory,'shared','Makefile')],['frame',join(tools,'Makefile')]])assert.ok(sections[`${name}-tools`].includes(`Source: ${file}\n\n${readFileSync(file,'utf8')}`));
-    assert.ok(system.includes(guidance));
-    assert.ok(system.includes(expected));for(const text of excluded)assert.ok(!system.includes(text));
+  const verify=(scope:string)=>async(context:TranscriptContext)=>{
+    const request=await providerRequest(context);
+    assert.deepEqual(request,{system:[guidance,scope].join('\n\n'),tools:['bash','edit','read','write']});
     return fauxAssistantMessage('instructions verified');
   };
-  const f=fixture([fauxAssistantMessage('older history summarized'),verify(a.tools,'alpha-only-instructions',['root-only-instructions','beta-only-instructions','changed-alpha-instructions']),verify(a.tools,'alpha-only-instructions',['changed-alpha-instructions','changed-shared-frame-guidance'])]);
-  const p=await Frame.open('instructions-a',f.models,model);
-  const q=await Frame.open('instructions-b',fixture([verify(b.tools,'beta-only-instructions',['root-only-instructions','alpha-only-instructions','changed-shared-frame-guidance'])]).models,model);
+  const f=fixture([fauxAssistantMessage('older history summarized'),verify('alpha-only-instructions'),verify('alpha-only-instructions'),verify('changed-alpha-instructions')]);
+  let p=await Frame.open('instructions-a',f.models,model);
+  const q=await Frame.open('instructions-b',fixture([verify('beta-only-instructions')]).models,model);
   try {
-    assert.equal(f.faux.state.callCount,0);
     await p.operation({op:'memory',field:'notes',content:'saved independently'});
     for(const content of ['old-history-marker','recent history '.repeat(10000)])await p.conversation.submit({type:'write',entry:{kind:'fixture',model:[{role:'user',content,timestamp:Date.now()}]}},ctx);
     const task=await p.conversation.compact(undefined,ctx);await p.harness.waitForTask(task,ctx);
@@ -488,13 +494,12 @@ test('frame scope survives compaction and loads independently on reopening',asyn
     assert.equal((await (await p.conversation.submit({type:'input',content:'after compaction'},ctx)).wait(ctx)).status,'done');
     assert.equal((await p.harness.snapshot(Memory,p.conversation.id,ctx))?.notes,'saved independently');
     writeFileSync(join(a.tools,'SCOPE.md'),'changed-alpha-instructions');
-    writeFileSync(join(directory,'FRAME.md'),'changed-shared-frame-guidance');
     assert.equal((await (await p.conversation.submit({type:'input',content:'same process'},ctx)).wait(ctx)).status,'done');
     assert.equal((await (await q.conversation.submit({type:'input',content:'other frame'},ctx)).wait(ctx)).status,'done');
     await p.close();
-    const reopened=await Frame.open('instructions-a',fixture([verify(a.tools,'changed-alpha-instructions',['alpha-only-instructions','beta-only-instructions'],'changed-shared-frame-guidance')]).models,model);
-    try {assert.equal((await (await reopened.conversation.submit({type:'input',content:'reopened'},ctx)).wait(ctx)).status,'done');}finally{await reopened.close();}
-  }finally{await p.close();await q.close();writeFileSync(join(directory,'FRAME.md'),'shared-frame-guidance');}
+    p=await Frame.open('instructions-a',f.models,model);
+    assert.equal((await (await p.conversation.submit({type:'input',content:'reopened'},ctx)).wait(ctx)).status,'done');
+  }finally{await p.close();await q.close();}
 });
 test('blank boot remains idle and unreadable instructions fail without retaining the lock',async()=>{
   const dirs=prepare('instructions-invalid');const file=join(dirs.tools,'SCOPE.md');
@@ -541,6 +546,7 @@ test('close waits for teardown and exposes its failure while releasing resources
   try {assert.deepEqual(await request('close-failure',{op:'close'}),{closed:true});assert.equal(readFileSync(join(dirs.tools,'closed'),'utf8'),'closed\nclosed\n');}finally{await q.close();}
 });
 test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
+  writeFrameSettings(prepare('alpha').tools,{model,memory:true,messaging:false});
   const a=fixture([async context=>{assert.ok(JSON.stringify(context).includes('remember-alpha'));return fauxAssistantMessage('alpha answer');}]);
   const b=fixture([fauxAssistantMessage('beta answer')]);
   const alpha=await Frame.open('alpha',a.models,model);const beta=await Frame.open('beta',b.models,model);
@@ -563,6 +569,7 @@ test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
 });
 test('receiving frame mailbox survives closed frames without creating tools and deduplicates retries',async()=>{
   const e=envelope('sender','receiving-frame','hello',{id:'stable-message'});
+  enableMessaging(e.from,e.to);
   const mailbox=new Store(e.to);mailbox.accept(e);mailbox.close();
   for(const file of ['SCOPE.md','Makefile','.frame-type'])assert.equal(existsSync(join(paths(e.to).tools,file)),false);
   assert.equal(paths(e.to).state,join(paths(e.to).tools,'.state'));
@@ -577,6 +584,7 @@ test('receiving frame mailbox survives closed frames without creating tools and 
   } finally {await receiving.close();}
 });
 test('frame send persists directly in the receiving frame mailbox with its input mode',async()=>{
+  enableMessaging('sending-frame','receiving-closed');
   const sending=await Frame.open('sending-frame',fixture().models,model);
   try {
     assert.equal(sending.messaging,true);
@@ -589,7 +597,7 @@ test('frame send persists directly in the receiving frame mailbox with its input
 });
 test('disabled messaging rejects messages and reports through live operations and closed mailboxes',async()=>{
   const disabled='messaging-disabled',enabled='messaging-enabled';
-  writeFrameSettings(prepare(disabled).tools,{model,messaging:false});
+  enableMessaging(enabled);
   const f=fixture();
   const off=await Frame.open(disabled,f.models,model);
   const on=await Frame.open(enabled,fixture().models,model);
@@ -621,6 +629,7 @@ test('disabled messaging rejects messages and reports through live operations an
 });
 test('disabled messaging retains reports and allows cancelling pending work with a new session',async()=>{
   const name='messaging-retained',tools=prepare(name).tools;
+  enableMessaging('sender',name);
   const original=await Frame.open(name,fixture().models,model);
   const id=original.conversation.id;
   const oldReport=envelope('sender',name,'retained passive report',{id:'retained-old-report',kind:'update'});
@@ -683,16 +692,17 @@ test('model and thinking selection preserve disabled messaging across reopening'
   const provider=fauxProvider({provider:'test',models:[{id:model.modelId,reasoning:true},{id:alternate.modelId,reasoning:true}]});
   const models=createModels();models.setProvider(provider.provider);
   const tools=prepare(name).tools;
-  writeFrameSettings(tools,{model,messaging:false});
+  const optIns={memory:true,toolSources:['frame/Makefile']};
+  writeFrameSettings(tools,{model,...optIns,messaging:false});
   const frame=await Frame.open(name,models,model);
   const id=frame.conversation.id;
   try {
     await frame.operation({op:'model',...alternate});
     assert.equal(readFrameSettings(tools)?.messaging,false);
     await frame.operation({op:'thinking',level:'high'});
-    assert.deepEqual(readFrameSettings(tools),{model:alternate,thinkingLevel:'high',messaging:false});
+    assert.deepEqual(readFrameSettings(tools),{model:alternate,thinkingLevel:'high',...optIns,messaging:false});
     await frame.operation({op:'thinking',level:null});
-    assert.deepEqual(readFrameSettings(tools),{model:alternate,messaging:false});
+    assert.deepEqual(readFrameSettings(tools),{model:alternate,...optIns,messaging:false});
   } finally {await frame.close();}
   const reopened=await Frame.open(name,models,model);
   try {
@@ -725,6 +735,7 @@ test('CLI frame IDs route explicitly and reject invalid IDs before changing a fr
 });
 test('CLI messaging changes require a closed frame and retain saved settings and conversation',async()=>{
   const name='messaging-cli',f=fixture();
+  enableMessaging(name);
   const frame=await Frame.open(name,f.models,model);
   const id=frame.conversation.id,tools=paths(name).tools,file=join(tools,'frame.env');
   let history:unknown;
@@ -750,6 +761,7 @@ test('CLI messaging changes require a closed frame and retain saved settings and
   const changed=await runCli('messaging',{id:name,ENABLED:'false'});
   assert.equal(changed.code,0,changed.stderr);
   assert.equal(JSON.parse(changed.stdout).enabled,false);
+  assert.doesNotMatch(readFileSync(file,'utf8'),/FRAME_MESSAGING/);
   assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
   assert.equal(f.faux.state.callCount,1);
   const reopened=await Frame.open(name,f.models,model);
@@ -762,6 +774,7 @@ test('CLI messaging changes require a closed frame and retain saved settings and
   } finally {await reopened.close();}
 });
 test('concurrent writers cannot accept conflicting content for one receiving frame request ID',{timeout:10000},async()=>{
+  enableMessaging('concurrent-sender','concurrent-receiving');
   const moduleUrl=new URL('../src/store.js',import.meta.url).href;
   const children:ReturnType<typeof spawn>[]=[];
   let ready=0;
@@ -793,8 +806,9 @@ test('concurrent writers cannot accept conflicting content for one receiving fra
   }finally{for(const child of children)child.kill();}
 });
 test('updates are durable and passive',async()=>{
+  enableMessaging('update-sender','updates');
   const f=fixture();const p=await Frame.open('updates',f.models,model);
-  const e=envelope('alpha','updates','decision needed',{kind:'update'});
+  const e=envelope('update-sender','updates','decision needed',{kind:'update'});
   await p.operation({op:'receive',envelope:e});await p.tick();assert.equal(f.faux.state.callCount,0);await p.close();
   const q=await Frame.open('updates',fixture().models,model);
   try {const updates=await q.operation({op:'updates',mark:true}) as any[];assert.equal(updates.length,1);assert.equal(updates[0].seen,false);assert.equal(q.store.updates()[0].seen,true);}finally{await q.close();}
@@ -858,6 +872,7 @@ test('SIGKILL releases lifetime lock and unsafe tool intent recovers without rep
 
 test('delivery recovers after receiving frame Durable admission before marking its mailbox placed',async()=>{
   const e=envelope('boundary-sender','boundary-receiving','exactly once',{id:'boundary'});
+  enableMessaging(e.from,e.to);
   const p=await Frame.open(e.to,fixture([fauxAssistantMessage('partial '.repeat(100))],10).models,model);
   p.store.accept(e);
   await p.conversation.submit({type:'input',content:`[From ${e.from}]\n${e.content}`,requestId:`message:${e.id}`,whenBusy:e.mode},ctx);
@@ -891,7 +906,7 @@ test('plan mode gates mutating tools to read-only until exited',async()=>{
     assert.deepEqual(await p.operation({op:'plan'}),{active:true,plan:''});
     assert.equal((await (await p.conversation.submit({type:'input',content:'design a change'},ctx)).wait(ctx)).status,'done');
     assert.equal(existsSync(target),false);
-    assert.equal(readFileSync(join(directory,'FRAME.md'),'utf8'),'shared-frame-guidance');
+    assert.equal(readFileSync(join(directory,'FRAME.md'),'utf8'),guidance);
     await p.operation({op:'plan-set',active:false,plan:'1. do the thing'});
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'1. do the thing'});
   }finally{await p.close();}
@@ -912,7 +927,7 @@ test('plan mode blocks shell bypass attempts',async()=>{
       assert.ok(last);
       assert.equal(last.isError,false);
       assert.equal(last.toolName,'read');
-      assert.ok(JSON.stringify(last.content).includes('shared-frame-guidance'));
+      assert.ok(last.content.some(block=>block.type==='text' && block.text.includes(guidance)));
       return fauxAssistantMessage('done');
     }
   ]);
@@ -1008,6 +1023,7 @@ test('new session starts fresh context while preserving memory and history',asyn
       return fauxAssistantMessage('second session answer');
     }
   ]);
+  writeFrameSettings(prepare('new-session').tools,{model,memory:true,messaging:false});
   const p=await Frame.open('new-session',f.models,model);
   try {
     const conversationId=p.conversation.id;
@@ -1089,6 +1105,7 @@ test('new session persists across frame reopen',async()=>{
 });
 test('new session cancels queued inputs and pending deliveries while preserving request identities and reports',async()=>{
   const f=fixture([fauxAssistantMessage('fresh done'),fauxAssistantMessage('reopened done')]);
+  enableMessaging('sender','new-queued');
   let p=await Frame.open('new-queued',f.models,model);
   const message=envelope('sender','new-queued','delivery before reset',{id:'stable-reset-delivery'});
   const report=envelope('sender','new-queued','retained report',{id:'stable-reset-report',kind:'update'});
@@ -1163,6 +1180,7 @@ test('new session cancels the running opening checklist',async()=>{
 });
 test('new session waits for in-flight mailbox delivery and admits later input into fresh context',{timeout:10000},async(t)=>{
   const f=fixture([fauxAssistantMessage('first response'),fauxAssistantMessage('second response'),fauxAssistantMessage('third response')]);
+  enableMessaging('sender','new-delivery-race');
   const p=await Frame.open('new-delivery-race',f.models,model);
   const submit=p.conversation.submit.bind(p.conversation);
   let entered=false;
@@ -1237,6 +1255,7 @@ test.after(()=>rmSync(directory,{recursive:true,force:true}));
 test('a migrated frame reopens its saved conversation, memory and queued mailbox',async()=>{
   const {migrateFrames}=await import('../src/migration.js');
   const config=fixture();
+  enableMessaging('sender','migration-resume');
   const original=await Frame.open('migration-resume',config.models,model);
   const id=original.conversation.id;
   await original.operation({op:'memory',field:'notes',content:'Retain migration memory'});

@@ -86,7 +86,7 @@ export function lock(id: string) {
 }
 export type Envelope = { id: string; from: string; to: string; content: string; kind: 'input' | 'update'; mode: 'steer' | 'followUp' };
 export function messagingEnabled(id:string) {
-  return readFrameSettings(paths(id).tools)?.messaging ?? true;
+  return readFrameSettings(paths(id).tools)?.messaging === true;
 }
 export class Store {
   db: DatabaseSync;

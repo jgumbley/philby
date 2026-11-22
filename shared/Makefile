@@ -31,7 +31,7 @@ override export MAX_SLIDES := $(value MAX_SLIDES)
 BROWSER_TOOLS := browser-connect browser-disconnect browser-status browser-tabs browser-run
 WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse wiki-pane-view
 GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login google-workspace-diagnose google-workspace-read google-workspace-spaces google-workspace-messages google-workspace-export google-workspace-download google-workspace-check google-workspace-test
-.PHONY: help ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
+.PHONY: help $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
 help:
 	@echo 'config-check; frame-config-check id=<id>; frame-config-migrate id=<id> — validate or migrate configuration through the root Makefile'
 	@echo 'frame-messaging id=<id> [ENABLED=true|false] — inspect messaging or change it for a closed frame'
@@ -66,17 +66,8 @@ help:
 	@echo 'wiki-publish CHANGE=stable-change-id; wiki-index; wiki-lint; commands serialize per graph'
 	@echo 'wiki-browse GRAPH_ROOT=path — local read-only terminal browser'
 	@echo 'wiki-check / wiki-test — check / validate the owned Rust source in shared/graphwiki'
-ask reason twitter:
-	@$(MAKE) --no-print-directory -C "$(ROOT)" build
-	@ROUTE=$@ node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" consult
-.PHONY: pane-start pane-list pane-stop wiki-pane
-pane-start pane-stop: override export PANE := $(value PANE)
-pane-start: override export TARGET := $(value TARGET)
-pane-start: override export PANE_SOURCE := $(value PANE_SOURCE)
-pane-start pane-list pane-stop: override MAKEOVERRIDES :=
-pane-start pane-list pane-stop:
-	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build
-	@node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" $@
+include $(ROOT)/shared/consult.mk $(ROOT)/shared/panes.mk
+.PHONY: wiki-pane
 wiki-pane:
 	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/Makefile" pane-start PANE=wiki TARGET=wiki-pane-view PANE_SOURCE=shared
 $(BROWSER_TOOLS) browser-check browser-test:

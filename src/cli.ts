@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { root, framesRoot, validateFrameId, Store, envelope, locked, lock, configured, frameTypes, paths, prepare, lastUsed } from './store.js';
 import { applyEnvironment, frameEnvironment } from './config.js';
-import { readFrameSettings, writeFrameSettings } from './frame-config.js';
+import { readFrameSettings, resolveToolSources, writeFrameSettings } from './frame-config.js';
 import { request, running } from './ipc.js';
 import { migrateFrames } from './migration.js';
 import { models } from './models.js';
@@ -123,7 +123,9 @@ async function main() {
   if(command==='config-migrate') {console.log(JSON.stringify(await migrateFrameSettings(id)));return;}
   if(command==='frame-config-check') {
     frameEnvironment(paths(id).tools,id,framesRoot);
-    if(!readFrameSettings(paths(id).tools)) throw Error('Missing frame.env; open a new frame or run make frame-config-migrate for a saved frame');
+    const settings=readFrameSettings(paths(id).tools);
+    if(!settings) throw Error('Missing frame.env; open a new frame or run make frame-config-migrate for a saved frame');
+    resolveToolSources(paths(id).tools,settings.toolSources);
     console.log(`Frame ${id} configuration valid.`);return;
   }
   if(command==='serve') {

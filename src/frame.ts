@@ -16,7 +16,8 @@ import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
 import { harnessSettings, modelThinkingLevel } from './settings.js';
 import { frameEnvironment } from './config.js';
-import { FrameSettingsWriteError, readFrameSettings, writeFrameSettings, type FrameSettings } from './frame-config.js';
+import { frameContext } from './frame-context.js';
+import { FrameSettingsWriteError, readFrameSettings, resolveToolSources, writeFrameSettings, type FrameSettings } from './frame-config.js';
 import { closeFramePanes, listFramePanes, startPane, stopPane } from '../tmux/index.js';
 export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
@@ -79,7 +80,7 @@ export class Frame {
   private closure?: Promise<void>;
   private hasLaunchedPanes = false;
   private boot = false;
-  private messagingEnabled = true;
+  private messagingEnabled = false;
   get messaging() {return this.messagingEnabled;}
   private shellEnv!:NodeJS.ProcessEnv;
   private settingsUpdate:Promise<unknown>=Promise.resolve();
@@ -96,48 +97,46 @@ export class Frame {
     p.release = lock(id);
     try {
       const dirs = prepare(id);
+      const database=join(dirs.state,'durable.sqlite');
+      const saved=readFrameSettings(dirs.tools);
+      if(!saved && existsSync(database)) throw Error(`Missing frame.env; run make frame-config-migrate id=${id}`);
       p.shellEnv=environment ?? frameEnvironment(dirs.tools,id,framesRoot);
-      let savedSettings=readFrameSettings(dirs.tools);
-      p.messagingEnabled=savedSettings?.messaging ?? true;
-      const guidance=readFileSync(join(root,'FRAME.md'),'utf8');
-      const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8');
+      const frameSettings:FrameSettings=saved ?? {model:typeof model==='function'?model():model,messaging:false};
+      const selected=frameSettings.model;
+      const selectedModel=models.getModel(selected.provider,selected.modelId);
+      if(!selectedModel) throw Error(`${saved ? 'Saved model' : 'Model'} unavailable: ${selected.provider}/${selected.modelId}`);
+      const sources=resolveToolSources(dirs.tools,frameSettings.toolSources);
+      p.messagingEnabled=frameSettings.messaging;
+      const guidance=readFileSync(join(root,'FRAME.md'),'utf8').trim();
+      const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8').trim();
       const settings=harnessSettings();
-      p.tools();
+      if(!saved) writeFrameSettings(dirs.tools,frameSettings);
       const boot=existsSync(join(dirs.tools,'BOOT.md')) ? readFileSync(join(dirs.tools,'BOOT.md'),'utf8').trim() : '';
       p.store = new Store(id);
       p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:p.shellEnv});
       const registry = createRegistry(); registry.install(CodingTools);
-      registry.install(defineExtension({name:'philby', tasks:[Startup], sections:[
-        section('frame', () => `Your frame is ${id}. Your working directory is ${dirs.tools}. Philby's root is ${root}. Shared capabilities are in ${root}/shared/Makefile. Your tools receive PHILBY_FRAME, PHILBY_ROOT and PHILBY_FRAMES_DIR.${p.messaging ? '' : ' Messaging is disabled for this frame. Do not send or receive frame messages or reports, or inspect updates.'}`),
-        section('frame-guidance', () => guidance || undefined),
-        section('frame-scope', () => scope || undefined),
-        ...Object.entries(p.makefiles).map(([label,file])=>section(`${label}-tools`,()=>{
-          let source: string;
-          try {source=readFileSync(file,'utf8');}
-          catch(error) {p.onError(error);source=`ERROR reading Makefile: ${String(error)}`;}
-          return `Source: ${file}\n\n${source}`;
-        })),
-        ...(p.messaging ? [section('unread-updates', () => JSON.stringify(p.store.updates().filter(u=>!u.seen).slice(-50)))] : []),
-        section('saved-memory', async (input, context) => JSON.stringify(await input.read.snapshot(Memory, input.conversationId, context))),
+      registry.install(defineExtension({name:'philby', tasks:[Startup], hooks:[frameContext], sections:[
+        section('frame-guidance', () => guidance || undefined,{tag:false}),
+        section('frame-scope', () => scope || undefined,{tag:false}),
+        ...(sources.length ? [section('tool-sources', () => `Make sources to read on demand:\n${sources.join('\n')}`)] : []),
+        ...(p.messaging ? [
+          section('messaging', () => `Use make -C "$PHILBY_ROOT" frame-send or frame-report with id=<receiving-frame>, from="${id}", a stable REQUEST_ID, and PROMPT_FILE or stdin. Both frames must enable messaging. Reports do not start a turn.`),
+          section('unread-updates', () => {
+            const unread=p.store.updates().filter(update=>!update.seen).slice(-50);
+            return unread.length ? JSON.stringify(unread) : undefined;
+          })
+        ] : []),
+        ...(frameSettings.memory ? [section('saved-memory', async (input, context) => {
+          const memory=await input.read.snapshot(Memory,input.conversationId,context);
+          const populated=Object.entries(memory ?? {}).filter(([,value])=>value.trim());
+          return populated.length ? JSON.stringify(Object.fromEntries(populated)) : undefined;
+        })] : []),
         section('plan-mode', async (input, context) => (await input.read.snapshot(PlanMode, input.conversationId, context))?.active ? PLAN_MODE_PROMPT : undefined),
         section('approved-plan', async (input, context) => { const doc = await input.read.snapshot(PlanMode, input.conversationId, context); return doc && !doc.active && doc.plan ? `Approved plan:\n${doc.plan}` : undefined; })
       ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
-      p.harness = await Harness.open(await openNodeSqliteStorage(join(dirs.state,'durable.sqlite')), {models, registry, settings, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
-      p.conversation = await p.harness.root(ctx, {init:async(tx,id)=>{
-        const initial=savedSettings?.model ?? (typeof model==='function'?model():model);
-        if(!models.getModel(initial.provider,initial.modelId)) throw Error(`Model unavailable: ${initial.provider}/${initial.modelId}`);
-        await configure(tx,id,{model:initial,cwd:dirs.tools});
-      }});
-      const stored=await p.harness.snapshot(AgentDoc,p.conversation.id,ctx);
-      const selected=savedSettings?.model ?? stored?.model;
-      if(!selected) throw Error('Saved conversation has no model');
-      const selectedModel=models.getModel(selected.provider,selected.modelId);
-      if(!selectedModel) throw Error(`Saved model unavailable: ${selected.provider}/${selected.modelId}`);
-      if(!savedSettings) {
-        savedSettings={model:selected,messaging:true,...(stored?.thinkingLevel===undefined?{}:{thinkingLevel:stored.thinkingLevel})};
-        writeFrameSettings(dirs.tools,savedSettings);
-      }
-      const thinkingLevel=savedSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
+      p.harness = await Harness.open(await openNodeSqliteStorage(database), {models, registry, settings, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
+      p.conversation = await p.harness.root(ctx, {init:(tx,id)=>configure(tx,id,{model:selected,cwd:dirs.tools})});
+      const thinkingLevel=frameSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
       await p.conversation.configure({model:selected,thinkingLevel:thinkingLevel ?? null},ctx);
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
@@ -342,7 +341,7 @@ export async function migrateFrameSettings(id:string) {
       if(!conversation) throw Error(`Frame ${id} has no saved conversation`);
       const saved=await harness.snapshot(AgentDoc,conversation.id,ctx);
       if(!saved?.model) throw Error(`Frame ${id} has no saved model`);
-      writeFrameSettings(directory,{model:saved.model,messaging:true,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
+      writeFrameSettings(directory,{model:saved.model,messaging:false,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
       return {id,migrated:true};
     } finally {await harness.close(ctx);}
   } finally {release();}

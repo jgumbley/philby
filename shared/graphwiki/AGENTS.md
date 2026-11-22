@@ -1,11 +1,6 @@
 # Engine instructions
 
-## Principles (Prime directives)
-
-- YAGNI — build only what is needed.
-- DRY — if something exists, reuse it.
-- KISS — keep it straightforward; no optional branches or toggles.
-- No fallbacks — they hide failures; let issues surface immediately.
+Follow the [shared prime directives](../../FRAME.md).
 
 This directory is Philby-owned Rust source for shared graph operations and their
 build. Each wiki frame owns its research content and authoring conventions.

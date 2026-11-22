@@ -8,6 +8,7 @@ const directory=mkdtempSync(join(tmpdir(),'philby-recipes-'));
 process.env.PHILBY_ROOT=directory;
 process.env.PHILBY_FRAMES_DIR=join(directory,'tools');
 cpSync(new URL('../../.env.schema',import.meta.url),join(directory,'.env.schema'));
+cpSync(new URL('../../shared/frame.env.schema',import.meta.url),join(directory,'shared','frame.env.schema'));
 cpSync(new URL('../../frame-types/plain',import.meta.url),join(directory,'frame-types','plain'),{recursive:true});
 const recipe=join(directory,'frame-types','fixture');
 mkdirSync(recipe,{recursive:true});
@@ -23,7 +24,12 @@ test('unknown recipes do not create a frame',()=>{
   assert.equal(existsSync(paths('invalid').tools),false);
 });
 
-test('a queued mailbox does not choose the receiving frame type',()=>{
+test('an opted-in queued mailbox does not choose the receiving frame type',()=>{
+  for(const id of ['source','waiting']) {
+    const {tools}=paths(id);
+    mkdirSync(tools,{recursive:true});
+    writeFileSync(join(tools,'frame.env'),'FRAME_MODEL=test/model\nFRAME_MESSAGING=true\n');
+  }
   const mailbox=new Store('waiting');
   const message=envelope('source','waiting','retained material',{id:'before-creation'});
   try {

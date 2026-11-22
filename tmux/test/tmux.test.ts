@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -14,6 +14,12 @@ function run(program:string,args:string[],input?:string,environment:NodeJS.Proce
 }
 const make=(...args:string[])=>run('make',['--no-print-directory',...args]);
 const tmux=(...args:string[])=>run('tmux',['-L',socket,...args]);
+function enableMessaging(name:string) {
+  const tools=join(env.PHILBY_FRAMES_DIR,name);
+  mkdirSync(tools,{recursive:true});
+  writeFileSync(join(tools,'frame.env'),'FRAME_MODEL=test/test\nFRAME_MESSAGING=true\n');
+  return tools;
+}
 function terminalCommand(command:string[]):[string,string[]] {
   if(process.platform==='darwin') return ['/bin/sh',['-c','cat | exec script -qF /dev/null "$@"','philby-test',...command]];
   if(process.platform==='linux') return ['script',['-qfec',command.map(arg=>`'${arg.replaceAll("'","'\\''")}'`).join(' '),'/dev/null']];
@@ -105,12 +111,14 @@ test('bare Make starts one selector without creating a frame and creates the fir
 test('frame selection, tmux inventory, terminal input, multiline sends, independent close, crash and confirmed quit',async()=>{
   let terminal:ReturnType<typeof spawn>|undefined;
   try {
+    enableMessaging('alpha');
     await make('frame','id=alpha');
     assert.match(await make('frame-list'),/alpha\s+running/);
     await Promise.all([make('frame','id=alpha'),make('frame','id=alpha')]);
     assert.equal((await tmux('list-windows','-t','philby','-F','#{window_name}')).trim(),'alpha');
     assert.equal((await tmux('display-message','-p','-t','philby:alpha','#{pane_title}')).trim(),'alpha');
-    const workerTools=join(directory,'frames','worker');mkdirSync(workerTools,{recursive:true});
+    const workerTools=enableMessaging('worker');
+    copyFileSync(join(root,'frame-types','plain','.env.schema'),join(workerTools,'.env.schema'));
     writeFileSync(join(workerTools,'BOOT.md'),'Verify the configured workspace.');
     writeFileSync(join(workerTools,'Makefile'),'close:\n\t@echo closed >> closed\n');
     terminal=spawn(...terminalCommand(['tmux','-L',socket,'attach-session','-t','philby']),{env:{...env,TMUX:'',TERM:'xterm-256color'},stdio:['pipe','ignore','inherit']});
@@ -264,6 +272,8 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
 test('typed creation preserves queued work and retired recipes can reopen their saved frames',async()=>{
   try {
     await assert.rejects(make('frame','id=retired','TYPE=graphwiki'),/Unknown frame type/);
+    enableMessaging('alpha');
+    enableMessaging('knowledge');
     await make('frame','id=alpha','TYPE=plain');
     for(const key of ['TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) await assert.rejects(tmux('show-environment','-g',key),/unknown variable/);
     await make('frame-send','from=alpha','id=knowledge','REQUEST_ID=before-type','prompt=Queued before choosing a type');
@@ -550,6 +560,7 @@ test('disabled messaging hides terminal commands and unread reports while ordina
   const screen=()=>tmux('capture-pane','-p','-t','philby:quiet');
   const command=(text:string)=>tmux('send-keys','-t','philby:quiet','C-u',text,'Enter');
   try {
+    enableMessaging('quiet');
     await make('frame','id=quiet');
     await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
     assert.match(await screen(),/\/updates/);
