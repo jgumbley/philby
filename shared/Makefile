@@ -66,7 +66,7 @@ help:
 	@echo 'wiki-publish CHANGE=stable-change-id; wiki-index; wiki-lint; commands serialize per graph'
 	@echo 'wiki-browse GRAPH_ROOT=path — local read-only terminal browser'
 	@echo 'wiki-check / wiki-test — check / validate the owned Rust source in shared/graphwiki'
-include $(ROOT)/shared/consult.mk $(ROOT)/shared/panes.mk
+include $(ROOT)/shared/consult.mk $(ROOT)/shared/panes.mk $(ROOT)/shared/search.mk
 .PHONY: wiki-pane
 wiki-pane:
 	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/Makefile" pane-start PANE=wiki TARGET=wiki-pane-view PANE_SOURCE=shared

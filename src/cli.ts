@@ -8,6 +8,8 @@ import { request, running } from './ipc.js';
 import { migrateFrames } from './migration.js';
 import { models } from './models.js';
 import { modelReference } from './providers.js';
+import { searchOpenRouter } from './search.js';
+import { recordSearch } from './search-record.js';
 import { Frame, capture, ctx, migrateFrameSettings } from './frame.js';
 import { selectFrame, startTui } from './tui.js';
 import { openFrame, openSelector, listViews, openShell, closeBrowsers, stopServer, installCloseBinding } from '../tmux/index.js';
@@ -77,6 +79,16 @@ async function main() {
     console.log('Quit cancelled.');return;
   }
   if(command==='window') return openShell();
+  if(command==='search') {
+    const frame=process.env.PHILBY_FRAME;
+    if(!frame) throw Error('Run search from a Philby frame');
+    const directory=paths(frame).tools;
+    applyEnvironment(frameEnvironment(directory,frame,framesRoot));
+    const query=await prompt();
+    const results=await searchOpenRouter(query);
+    console.log(recordSearch(directory,query,results));
+    return;
+  }
   if(command==='consult') {
     if(process.env.PHILBY_FRAME) {
       const frame=validateFrameId(process.env.PHILBY_FRAME);
