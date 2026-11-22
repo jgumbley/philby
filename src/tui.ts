@@ -19,22 +19,19 @@ export function assistantWarnings(message:Pick<AssistantMessage,'stopReason'|'co
   for(const part of message.content) if(part.type==='toolCall' && part.argumentsError) warnings.push(`${part.name} was not executed: invalid tool arguments. ${part.argumentsError.split('\n')[0]}`);
   return warnings;
 }
-export function selectFrame(open:(id:string,type?:string)=>Promise<void>,frames:{id:string;running:boolean}[],types:string[]):Promise<void> {
+export function selectFrame(open:(id:string,type?:string)=>Promise<void>,frames:{id:string;running:boolean;lastUsed:number}[],types:string[]):Promise<void> {
   if(!process.stdin.isTTY) throw Error('Frame selection requires a terminal');
   const tui=new TuiMainScreen(new ProcessTerminal());
   const header=new Text('',0,1);
   const content=new Container();
   const input=new Input({prompt:'Frame ID: '});
-  const list=new SelectList([{value:'',label:'New frame…',description:'Choose a type and ID'},...frames.map(p=>({value:p.id,label:p.id,description:p.running?'Open — switch to frame':'Closed — resume conversation'}))],8,selectTheme);
+  const frameList=(ordered:typeof frames)=>new SelectList([{value:'',label:'New frame…',description:'Choose a type and ID'},...ordered.map(p=>({value:p.id,label:p.id,description:p.running?'Open — switch to frame':'Closed — resume conversation'}))],8,selectTheme);
+  let byLastUsed=true;
+  let step:'frames'|'types'|'id';
   const recipes=new SelectList(types.map(value=>({value,label:value})),8,selectTheme);
   let selectedType=types[0];
   const info=new Text('',0,1);
   tui.addChild(header);tui.addChild(content);tui.addChild(info);
-  const show=(step:'frames'|'types'|'id')=>{
-    header.setText(accent(step==='id'?'Choose a frame ID':step==='types'?'Choose a frame type':'Open a frame'));
-    const view=step==='id'?input:step==='types'?recipes:list;content.clear();content.addChild(view);tui.setFocus(view);
-    info.setText(dim(step==='id'?'Enter opens · Esc returns to types':step==='types'?`↑/↓ select · Enter chooses ID · Esc ${frames.length?'returns to frames':'cancels'}`:'↑/↓ select · Enter opens · Esc cancels'));tui.requestRender();
-  };
   return new Promise(resolve=>{
     let busy=false;
     const cancel=()=>{if(!busy){tui.stop();resolve();}};
@@ -46,12 +43,20 @@ export function selectFrame(open:(id:string,type?:string)=>Promise<void>,frames:
         await open(value,type);tui.stop();resolve();
       } catch(error) {busy=false;info.setText(String(error));tui.requestRender();}
     };
+    const show=(next:typeof step)=>{
+      step=next;
+      header.setText(accent(step==='id'?'Choose a frame ID':step==='types'?'Choose a frame type':'Open a frame'));
+      const ordered=byLastUsed?[...frames].sort((a,b)=>b.lastUsed-a.lastUsed || a.id.localeCompare(b.id)):frames;
+      const list=frameList(ordered);
+      list.onSelect=item=>{if(busy)return;if(item.value)void submit(item.value);else show('types');};
+      list.onCancel=cancel;
+      const view=step==='id'?input:step==='types'?recipes:list;content.clear();content.addChild(view);tui.setFocus(view);
+      info.setText(dim(step==='id'?'Enter opens · Esc returns to types':step==='types'?`↑/↓ select · Enter chooses ID · Esc ${frames.length?'returns to frames':'cancels'}`:`↑/↓ select · Enter opens · Esc cancels · Tab sort (${byLastUsed?'last used':'name'})`));tui.requestRender();
+    };
     input.onSubmit=value=>submit(value,selectedType);
-    list.onSelect=item=>{if(busy)return;if(item.value)void submit(item.value);else show('types');};
     recipes.onSelect=item=>{if(busy)return;selectedType=item.value;input.setValue('');show('id');};
     recipes.onCancel=()=>{if(!busy){if(frames.length)show('frames');else cancel();}};
-    list.onCancel=cancel;
-    tui.addInputListener(data=>{if(busy)return {consume:true};if(matchesKey(data,'ctrl+c') || matchesKey(data,'ctrl+d')){cancel();return {consume:true};}});
+    tui.addInputListener(data=>{if(busy)return {consume:true};if(step==='frames' && matchesKey(data,'tab')){byLastUsed=!byLastUsed;show('frames');return {consume:true};}if(matchesKey(data,'ctrl+c') || matchesKey(data,'ctrl+d')){cancel();return {consume:true};}});
     show(frames.length?'frames':'types');tui.start();
   });
 }

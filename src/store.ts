@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, mkdtempSync, cpSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, mkdtempSync, cpSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -31,6 +31,15 @@ export function frameTypes() {
 export function configured(id: string) {
   const p=paths(id);
   return ['.frame-type','SCOPE.md','AGENTS.md','Makefile'].some(file=>existsSync(join(p.tools,file))) || existsSync(join(p.state,'durable.sqlite'));
+}
+export function lastUsed(id: string) {
+  const {state}=paths(id);
+  return Math.max(...['last-used','durable.sqlite','durable.sqlite-wal'].map(file=>
+    statSync(join(state,file),{throwIfNoEntry:false})?.mtimeMs ?? 0
+  ));
+}
+export function markUsed(id: string) {
+  writeFileSync(join(paths(id).state,'last-used'),'',{mode:0o600});
 }
 export function prepare(id: string, type?: string) {
   const p = paths(id);

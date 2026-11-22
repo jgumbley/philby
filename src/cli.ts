@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { root, framesRoot, validateFrameId, Store, envelope, locked, lock, configured, frameTypes, paths, prepare } from './store.js';
+import { root, framesRoot, validateFrameId, Store, envelope, locked, lock, configured, frameTypes, paths, prepare, lastUsed } from './store.js';
 import { applyEnvironment, frameEnvironment } from './config.js';
 import { readFrameSettings, writeFrameSettings } from './frame-config.js';
 import { request, running } from './ipc.js';
@@ -52,7 +52,7 @@ async function main() {
     return;
   }
   for(const key of ['id','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) delete process.env[key];
-  if(command==='name') return selectFrame(openFrame,await Promise.all(saved().sort().map(async id=>({id,running:!!await running(id)}))),frameTypes());
+  if(command==='name') return selectFrame(openFrame,await Promise.all(saved().sort().map(async id=>({id,running:!!await running(id),lastUsed:lastUsed(id)}))),frameTypes());
   if(command==='new') return openSelector();
   if(command==='open') return destination?openFrame(validateFrameId(destination),type):openSelector();
   if(command==='send' || command==='report') return send(destination,command==='report'?'update':'input');

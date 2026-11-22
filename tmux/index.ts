@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
-import { root, framesRoot, runtimeDir, prepare } from '../src/store.js';
+import { root, framesRoot, runtimeDir, prepare, markUsed } from '../src/store.js';
 import { invocationEnvironment, piAgentDir } from '../src/config.js';
 import { running } from '../src/ipc.js';
 import { installKittyNavigation } from './kitty.js';
@@ -82,6 +82,7 @@ export async function openFrame(id:string,type?:string) {
     const view=tmux(['list-panes','-t',target,'-F','#{pane_id}\t#{pane_title}']).stdout.trim().split('\n').filter(line=>line.split('\t')[1]===id);
     if(view.length!==1) throw Error(`Expected one agent view for ${id}`);
     tmux(['select-pane','-t',view[0].split('\t')[0]]);
+    markUsed(id);
   } finally {mutex.close();}
   await attach(id);
 }
