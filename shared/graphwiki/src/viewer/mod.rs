@@ -65,11 +65,34 @@ fn lock() -> Result<std::fs::File> {
     Ok(file)
 }
 
+fn next_event() -> std::io::Result<Event> {
+    loop {
+        let input = event::read()?;
+        if handles(&input) {
+            return Ok(input);
+        }
+    }
+}
+
+fn handles(input: &Event) -> bool {
+    match input {
+        Event::Mouse(mouse) => matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::Down(MouseButton::Left)
+        ),
+        Event::Key(key) => key.kind == KeyEventKind::Press,
+        Event::Resize(..) => true,
+        _ => false,
+    }
+}
+
 impl Viewer {
     fn run(&mut self, root: &Path) -> std::io::Result<()> {
         loop {
             let document = self.draw()?;
-            if !self.event(event::read()?, &document, root) {
+            if !self.event(next_event()?, &document, root) {
                 return Ok(());
             }
         }
@@ -104,7 +127,7 @@ impl Viewer {
 
     fn event(&mut self, event: Event, document: &Document, root: &Path) -> bool {
         match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
+            Event::Key(key) => {
                 self.key(key.code, document, root);
                 key.code != KeyCode::Char('q')
             }

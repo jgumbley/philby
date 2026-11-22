@@ -41,10 +41,17 @@ pub fn draw(
     message: &str,
 ) -> io::Result<()> {
     let (width, height) = terminal::size()?;
-    let mut output = io::stdout();
+    let mut output = Vec::new();
     header(&mut output, width)?;
     body(&mut output, document, (offset, height), selected)?;
-    footer(&mut output, message, (width, height))
+    footer(&mut output, message, (width, height))?;
+    present(&output)
+}
+
+fn present(frame: &[u8]) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    stdout.write_all(frame)?;
+    stdout.flush()
 }
 
 const TABS: [(&str, style::Color); 3] = [
@@ -92,6 +99,7 @@ const TEXT: style::Color = style::Color::Rgb {
 fn header(output: &mut impl Write, width: u16) -> io::Result<()> {
     queue!(
         output,
+        terminal::BeginSynchronizedUpdate,
         style::SetAttribute(style::Attribute::Reset),
         terminal::Clear(terminal::ClearType::All),
         cursor::MoveTo(0, 0),
@@ -160,9 +168,9 @@ fn footer(output: &mut impl Write, message: &str, size: (u16, u16)) -> io::Resul
         style::SetForegroundColor(TEXT),
         style::Print(text),
         style::Print(fill),
-        style::ResetColor
-    )?;
-    output.flush()
+        style::ResetColor,
+        terminal::EndSynchronizedUpdate
+    )
 }
 
 fn clipped(text: &str, width: u16) -> String {
