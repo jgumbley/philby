@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 const directory=mkdtempSync(join(tmpdir(),'philby-tmux-'));
 const socket=`philby-test-${process.pid}`;
 const root=resolve('.');
@@ -22,6 +23,11 @@ async function until(fn:()=>Promise<boolean>) {for(let i=0;i<100;i++){if(await f
 async function selector(title='Open a frame') {
   await until(async()=> (await tmux('capture-pane','-p','-t','philby:')).includes(title));
   return (await tmux('display-message','-p','-t','philby:','#{pane_id}')).trim();
+}
+async function selectorByName() {
+  const pane=await selector();
+  await tmux('send-keys','-t',pane,'Tab');
+  return selector('Tab sort (name)');
 }
 test('terminal wrapper preserves literal arguments, supplies a TTY and propagates failure',async()=>{
   const literal="spaces 'quotes' $HOME `literal` $(literal)";
@@ -135,7 +141,7 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
     await until(async()=> (await tmux('display-message','-p','-t','philby:','#{window_name}')).trim()==='worker');
     assert.equal((await tmux('list-windows','-t','philby','-F','#{window_name}')).trim(),'alpha\nworker');
     await make('frame-new');
-    const existing=await selector();
+    const existing=await selectorByName();
     assert.match(await tmux('capture-pane','-p','-t',existing),/alpha[\s\S]*worker/);
     await tmux('send-keys','-t',existing,'Down','Down','Enter');
     await until(async()=> (await tmux('list-windows','-t','philby','-F','#{window_name}')).trim()==='alpha\nworker');
@@ -192,7 +198,7 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
     assert.match(await make('frame-list'),/worker\s+running/);
     await run('make',['--no-print-directory','frame-send','id=alpha','from=worker','REQUEST_ID=closed'],'while closed\nsecond line');
     await make('frame-new');
-    const reopening=await selector();
+    const reopening=await selectorByName();
     assert.match(await tmux('capture-pane','-p','-t',reopening),/alpha[\s\S]*Closed — resume conversation[\s\S]*worker[\s\S]*Open — switch to frame/);
     await tmux('send-keys','-t',reopening,'Down','Enter');
     await until(async()=> (await make('frame-list')).includes('alpha\trunning'));
@@ -255,9 +261,10 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);terminal?.stdin?.end();terminal?.kill();rmSync(directory,{recursive:true,force:true});}
 });
 
-test('typed creation through selector preserves queued work and concurrent reopening',async()=>{
+test('typed creation preserves queued work and retired recipes can reopen their saved frames',async()=>{
   try {
-    await make('frame','id=alpha','TYPE=graphwiki');
+    await assert.rejects(make('frame','id=retired','TYPE=graphwiki'),/Unknown frame type/);
+    await make('frame','id=alpha','TYPE=plain');
     for(const key of ['TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) await assert.rejects(tmux('show-environment','-g',key),/unknown variable/);
     await make('frame-send','from=alpha','id=knowledge','REQUEST_ID=before-type','prompt=Queued before choosing a type');
     await assert.rejects(make('frame-capture','id=knowledge'),/No saved conversation/);
@@ -266,23 +273,222 @@ test('typed creation through selector preserves queued work and concurrent reope
     const creating=await selector();
     await tmux('send-keys','-t',creating,'Enter');
     await until(async()=> (await tmux('capture-pane','-p','-t',creating)).includes('Choose a frame type'));
-    await tmux('send-keys','-t',creating,'Down','Enter');
+    assert.doesNotMatch(await tmux('capture-pane','-p','-t',creating),/graphwiki/);
+    await tmux('send-keys','-t',creating,'Enter');
     await until(async()=> (await tmux('capture-pane','-p','-t',creating)).includes('Choose a frame ID'));
     await tmux('send-keys','-t',creating,'knowledge','Enter');
     await until(async()=> (await make('frame-list')).includes('knowledge\trunning'));
     const tools=join(directory,'frames','knowledge');
-    assert.equal(readFileSync(join(tools,'.frame-type'),'utf8'),'graphwiki\n');
+    assert.equal(readFileSync(join(tools,'.frame-type'),'utf8'),'plain\n');
     await until(async()=> (await make('frame-capture','id=knowledge')).includes('Received: [From alpha]'));
     const before=JSON.parse(await make('frame-capture','id=knowledge'));
     writeFileSync(join(tools,'SCOPE.md'),'Edited by the user');
     await make('frame-close','id=knowledge');
-    await Promise.all([make('frame','id=knowledge','TYPE=graphwiki'),make('frame','id=knowledge','TYPE=graphwiki')]);
+    writeFileSync(join(tools,'.frame-type'),'graphwiki\n');
+    await Promise.all([make('frame','id=knowledge'),make('frame','id=knowledge','TYPE=graphwiki')]);
     assert.equal((await tmux('list-windows','-t','philby','-F','#{window_name}')).trim(),'alpha\nknowledge');
     assert.equal(readFileSync(join(tools,'SCOPE.md'),'utf8'),'Edited by the user');
     assert.deepEqual(JSON.parse(await make('frame-capture','id=knowledge')),before);
     await assert.rejects(make('frame','id=knowledge','TYPE=plain'),/already exists with type graphwiki/);
     await assert.rejects(make('frame','id=invalid','TYPE=unknown'),/Unknown frame type/);
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
+});
+
+test('frame panes keep operator focus, isolate duplicate names, and retain terminal output across reruns and close',async()=>{
+  const activePane=async()=>(await tmux('display-message','-p','-t','philby:','#{pane_id}')).trim();
+  const windowNames=async()=>(await tmux('list-windows','-t','philby','-F','#{window_name}')).trim().split('\n');
+  const paneCommand=(op:string,owner:string,...args:string[])=>make('-C','shared',`pane-${op}`,`id=${owner}`,...args);
+  const start=async(owner:string,name:string,target='interact')=>JSON.parse(await paneCommand('start',owner,`PANE=${name}`,`TARGET=${target}`)) as {pane:string;name:string;log:string;started:boolean};
+  const log=(path:string)=>existsSync(path)?readFileSync(path,'utf8'):'';
+  let terminal:ReturnType<typeof spawn>|undefined;
+  try {
+    for(const owner of ['research','review']) {
+      await make('frame',`id=${owner}`);
+      const cwd=join(env.PHILBY_FRAMES_DIR,owner);
+      writeFileSync(join(cwd,'Makefile'),[
+        '.PHONY: interact quick',
+        'interact:',
+        '\t@test -t 0 && test -t 1 && test -t 2',
+        '\t@printf "FIRST-%s\\n" "$$PHILBY_FRAME"',
+        '\t@printf "STDERR-%s\\n" "$$PHILBY_FRAME" >&2',
+        '\t@echo $$$$ > reader.pid; read -r answer && printf "ANSWER-%s\\n" "$$answer"; if [ "$$answer" = second-run ]; then read -r remaining; fi',
+        'quick:',
+        '\t@printf "IMMEDIATE\\n"',
+        '',
+      ].join('\n'));
+    }
+    const review=await activePane();
+    const launches=await Promise.all([start('research','monitor'),start('research','monitor')]);
+    const monitor=launches[0];
+    assert.equal(monitor.pane,launches[1].pane);
+    assert.equal(launches.filter(item=>item.started).length,1);
+    assert.equal(monitor.log,join(env.PHILBY_FRAMES_DIR,'research','panes','monitor','out.log'));
+    await until(async()=>log(monitor.log).includes('STDERR-research'));
+    assert.equal(statSync(monitor.log).mode&0o777,0o600);
+    assert.equal(statSync(resolve(monitor.log,'..')).mode&0o777,0o700);
+    assert.match(log(monitor.log),/FIRST-research/);
+    await assert.rejects(start('research','monitor','quick'));
+    const quick=await start('research','details','quick');
+    await until(async()=>log(quick.log).includes('IMMEDIATE'));
+    const other=await start('review','monitor');
+    assert.notEqual(monitor.pane,other.pane);
+    assert.equal(await activePane(),review);
+    assert.deepEqual(await windowNames(),['research','monitor','details','review','monitor']);
+    assert.equal((await tmux('display-message','-p','-t',review,'#{@philby_frame} #{@philby_agent}')).trim(),`review ${review}`);
+    assert.equal((await tmux('display-message','-p','-t',monitor.pane,'#{@philby_frame} #{@philby_pane}')).trim(),'research monitor');
+    for(const format of ['window-status-format','window-status-current-format']) {
+      const label=(pane:string)=>tmux('display-message','-p','-t',pane,`#{E:${format}}`);
+      assert.match(await label(review),/fg=#4FC1FF.*📡.*review/i);
+      assert.match(await label(monitor.pane),/fg=#C3A6FF.*🖥.*monitor/i);
+    }
+    await until(async()=>log(other.log).includes('FIRST-review'));
+    await tmux('select-pane','-t',monitor.pane,'-T','a program changed its title');
+    assert.equal((await tmux('display-message','-p','-t',monitor.pane,'#{window_name}')).trim(),'monitor');
+    assert.deepEqual(JSON.parse(await paneCommand('list','research')).map((item:{name:string})=>item.name).sort(),['details','monitor']);
+    assert.match(await make('frame-list'),/monitor/);
+    await make('frame','id=research');
+    terminal=spawn(...terminalCommand(['tmux','-L',socket,'attach-session','-t','philby']),{env:{...env,TMUX:'',TERM:'xterm-256color'},stdio:['pipe','ignore','inherit']});
+    await until(async()=> (await tmux('list-clients','-F','#{client_name}')).trim()!=='');
+    const research=await activePane();
+    terminal.stdin!.write('\x1b[1;5F');
+    await until(async()=>await activePane()===monitor.pane);
+    terminal.stdin!.write('\x1b[1;5H');
+    await until(async()=>await activePane()===research);
+    terminal.stdin!.write('\x1b[1;5F');
+    await until(async()=>await activePane()===monitor.pane);
+    await tmux('send-keys','-t',monitor.pane,'first-run','Enter');
+    await until(async()=>log(monitor.log).includes('ANSWER-first-run'));
+    await until(async()=>/enter.*(?:restart|rerun|run again)/i.test(await tmux('capture-pane','-p','-t',monitor.pane)));
+    await tmux('send-keys','-t',monitor.pane,'Enter');
+    await until(async()=>log(monitor.log).split('FIRST-research').length===3);
+    await tmux('send-keys','-t',monitor.pane,'second-run','Enter');
+    await until(async()=>log(monitor.log).includes('ANSWER-second-run'));
+    assert.doesNotMatch(await make('frame-capture','id=research','ALL=1'),/FIRST-research|ANSWER-first-run|ANSWER-second-run/);
+    await tmux('set-option','-p','-t',quick.pane,'@philby_pane','details',';',
+      'set-option','-p','-t',quick.pane,'@philby_view',quick.pane,';',
+      'join-pane','-dv','-s',quick.pane,'-t',research);
+    assert.deepEqual(JSON.parse(await paneCommand('stop','research','PANE=details')),{stopped:true});
+    assert.equal((await tmux('show-options','-wqv','-t',research,'@philby_agent')).trim(),research);
+    assert.deepEqual(await windowNames(),['research','monitor','review','monitor']);
+    assert.match(log(quick.log),/IMMEDIATE/);
+    const reader=Number(readFileSync(join(env.PHILBY_FRAMES_DIR,'research','reader.pid'),'utf8'));
+    process.kill(reader,0);
+    await make('frame-close','id=research');
+    await until(async()=>(await windowNames()).join(',')==='review,monitor');
+    assert.throws(()=>process.kill(reader,0),{code:'ESRCH'});
+    const retained=log(monitor.log);
+    assert.match(retained,/ANSWER-first-run[\s\S]*ANSWER-second-run/);
+    await make('frame','id=research');
+    assert.equal(log(monitor.log),retained);
+    assert.deepEqual(await windowNames(),['review','monitor','research']);
+    assert.deepEqual(JSON.parse(await paneCommand('list','research')),[]);
+    assert.match(await paneCommand('list','review'),/monitor/);
+    const otherReader=Number(readFileSync(join(env.PHILBY_FRAMES_DIR,'review','reader.pid'),'utf8'));
+    process.kill(otherReader,0);
+    await tmux('kill-window','-t',review);
+    await until(async()=>(await windowNames()).join(',')==='research');
+    assert.throws(()=>process.kill(otherReader,0),{code:'ESRCH'});
+    assert.match(log(other.log),/FIRST-review/);
+  } finally {
+    await make('cleanup').catch(()=>{});
+    spawnSync('tmux',['-L',socket,'kill-server']);
+    terminal?.stdin?.end();
+    terminal?.kill();
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test('native Ctrl-C confirms the selected pane or frame, including retained failed windows',async()=>{
+  let terminal:ReturnType<typeof spawn>|undefined;
+  let display='';
+  const screen=()=>stripVTControlCharacters(display).replace(/\s/g,'');
+  const viewIds=async()=>(await tmux('list-panes','-a','-F','#{pane_id}')).trim().split('\n');
+  const start=async(owner:string,name:string,target='listen')=>{
+    const result=await make('-C','shared','pane-start',`id=${owner}`,`PANE=${name}`,`TARGET=${target}`);
+    return JSON.parse(result) as {pane:string;log:string};
+  };
+  const prompt=async(pane:string,title:string)=>{
+    await tmux('select-window','-t',pane);
+    display='';
+    terminal!.stdin!.write('\x03');
+    await until(async()=>screen().includes(title.replace(/\s/g,'')));
+  };
+  const key=async(value:string)=>{
+    display='';
+    terminal!.stdin!.write(value);
+    await until(async()=>display.length>0);
+  };
+  const confirm=async(pane:string,title:string)=>{
+    await prompt(pane,title);
+    await key('\x1b[C');
+    terminal!.stdin!.write('\r');
+  };
+  try {
+    for(const owner of ['owner','neighbor']) {
+      const dir=join(env.PHILBY_FRAMES_DIR,owner);
+      mkdirSync(dir,{recursive:true});
+      writeFileSync(join(dir,'Makefile'),[
+        'listen:',
+        '\t@echo ready; while read -r word; do echo "ack-$$word"; done',
+        'fail:',
+        '\t@exit 17',
+        'close:',
+        '\t@echo closed >> shutdown',
+        '',
+      ].join('\n'));
+      if(owner==='owner') writeFileSync(join(dir,'BOOT.md'),'Check the terminal fixture.');
+      await make('frame',`id=${owner}`);
+    }
+    const owner=(await tmux('display-message','-p','-t','philby:owner','#{pane_id}')).trim();
+    const neighbor=(await tmux('display-message','-p','-t','philby:neighbor','#{pane_id}')).trim();
+    const watch=await start('owner','watch');
+    const remaining=await start('owner','remaining');
+    const failed=await start('neighbor','failed','fail');
+    terminal=spawn(...terminalCommand(['tmux','-L',socket,'attach-session','-t','philby']),{env:{...env,TMUX:'',TERM:'xterm-256color'},stdio:['pipe','pipe','inherit']});
+    terminal.stdout!.setEncoding('utf8').on('data',chunk=>{display=(display+chunk).slice(-65536);});
+    await until(async()=>(await tmux('list-clients','-F','#{client_name}')).trim()!=='');
+    for(const [index,keys] of [['\r'],['\x1b[C','\x1b[D','\r'],['\x1b']].entries()) {
+      await prompt(watch.pane,'Kill pane watch?');
+      for(const input of keys) await key(input);
+      await until(async()=>screen().includes('ready'));
+      terminal.stdin!.write(`probe${index}\r`);
+      await until(async()=>readFileSync(watch.log,'utf8').includes(`ack-probe${index}`));
+    }
+    const split=(await tmux('split-window','-dP','-F','#{pane_id}','-t',watch.pane,'sleep','120')).trim();
+    await confirm(watch.pane,'Kill pane watch?');
+    await until(async()=>!(await viewIds()).includes(watch.pane));
+    assert.ok((await viewIds()).includes(split));
+    await tmux('kill-pane','-t',split);
+    assert.ok((await viewIds()).includes(remaining.pane));
+    await prompt(owner,'Kill frame owner and its panes?');
+    await key('\r');
+    await until(async()=>screen().includes('owner'));
+    assert.ok((await viewIds()).includes(owner));
+    await confirm(owner,'Kill frame owner and its panes?');
+    await until(async()=>!(await viewIds()).includes(owner));
+    assert.deepEqual((await viewIds()).sort(),[neighbor,failed.pane].sort());
+    assert.equal(readFileSync(join(env.PHILBY_FRAMES_DIR,'owner','shutdown'),'utf8'),'closed\n');
+    await until(async()=>(await tmux('capture-pane','-p','-t',failed.pane)).includes('Press Enter'));
+    process.kill(Number(await tmux('display-message','-p','-t',failed.pane,'#{pane_pid}')),'SIGKILL');
+    await until(async()=>(await tmux('display-message','-p','-t',failed.pane,'#{pane_dead}')).trim()==='1');
+    await confirm(failed.pane,'Kill pane failed?');
+    await until(async()=>!(await viewIds()).includes(failed.pane));
+    const orphan=await start('neighbor','orphan');
+    const shell=(await tmux('new-window','-dP','-F','#{pane_id}','-t','philby:','-n','shell','sleep','120')).trim();
+    const status=JSON.parse(await run('node',['dist/src/cli.js','status','neighbor']));
+    process.kill(status.pid,'SIGKILL');
+    await until(async()=>(await tmux('display-message','-p','-t',neighbor,'#{pane_dead}')).trim()==='1');
+    await confirm(neighbor,'Kill frame neighbor and its panes?');
+    await until(async()=>(await viewIds()).join(',')===shell);
+    assert.ok(existsSync(orphan.log));
+    assert.match(await make('frame-list'),/neighbor\tsaved/);
+  } finally {
+    await make('cleanup').catch(()=>{});
+    spawnSync('tmux',['-L',socket,'kill-server']);
+    terminal?.stdin?.end();
+    terminal?.kill();
+    rmSync(directory,{recursive:true,force:true});
+  }
 });
 
 test('native model shortlist toggles all models, cancels locally and preserves selected model and history',async()=>{

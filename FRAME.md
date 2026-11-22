@@ -38,6 +38,22 @@ Purpose-specific operations still belong behind reusable Make targets. Repair
 or report failures explicitly. No code comments. Changes to Philby itself
 require explicit direction.
 
+## Panes
+
+A pane is an interactive terminal owned by your frame. Use the shared Makefile
+to launch a named foreground target when the operator needs to use a program
+directly, answer a prompt or visit a running server. The operator can switch to
+the pane in tmux while you continue working. Ask them to enter credentials
+directly at the program's password prompt.
+
+Keep files for a pane in `panes/<name>/` inside your frame. The launch receipt
+identifies the tmux pane and its private `out.log`. The target runs independently
+and its output and exit code accumulate in the log across runs. Read the
+relevant part when investigating a result or failure. Closing your frame stops
+its panes and preserves their files. Starting an open pane returns its existing
+terminal. After the command exits, the operator can press Enter to rerun it,
+or you can stop the pane and start it again.
+
 ## Communication and memory
 
 Frame messages and passive reports require messaging enabled for both frames.

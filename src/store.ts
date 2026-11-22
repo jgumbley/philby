@@ -43,7 +43,6 @@ export function markUsed(id: string) {
 }
 export function prepare(id: string, type?: string) {
   const p = paths(id);
-  if(type!==undefined && !frameTypes().includes(type)) throw Error(`Unknown frame type: ${type}`);
   if(existsSync(join(p.tools,'AGENTS.md')) && !existsSync(join(p.tools,'SCOPE.md'))) throw Error(`Frame ${id} uses AGENTS.md; rename it to SCOPE.md before opening`);
   const marker=join(p.tools,'.frame-type');
   if(configured(id)) {
@@ -57,6 +56,7 @@ export function prepare(id: string, type?: string) {
       }
     }
   } else {
+    if(type!==undefined && !frameTypes().includes(type)) throw Error(`Unknown frame type: ${type}`);
     mkdirSync(dirname(p.tools),{recursive:true});
     const staging=mkdtempSync(join(dirname(p.tools),'.creating-'));
     try {

@@ -1,4 +1,0 @@
-.state/
-.env
-.env.*
-!.env.schema

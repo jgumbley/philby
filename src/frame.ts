@@ -17,6 +17,7 @@ import type { ModelReference } from './providers.js';
 import { harnessSettings, modelThinkingLevel } from './settings.js';
 import { frameEnvironment } from './config.js';
 import { FrameSettingsWriteError, readFrameSettings, writeFrameSettings, type FrameSettings } from './frame-config.js';
+import { closeFramePanes, listFramePanes, startPane, stopPane } from '../tmux/index.js';
 export { ctx };
 export type ModelSelection = {current:{provider:string;modelId:string};choices:ModelChoice[];errors:string[]};
 export const Memory = defineDoc({ kind:'philby.memory', version:1, scope:'conversation', history:'latest', fork:'initial', checkpointWhen:()=>true, initial: () => ({ responsibilities:'', notes:'', decisions:'', outstanding:'', sources:'' }) });
@@ -76,6 +77,7 @@ export class Frame {
   onClose?: () => void;
   onError: (error: unknown) => void = e => console.error(String(e));
   private closure?: Promise<void>;
+  private hasLaunchedPanes = false;
   private boot = false;
   private messagingEnabled = true;
   get messaging() {return this.messagingEnabled;}
@@ -180,6 +182,19 @@ export class Frame {
     if(!this.messaging && ['send','receive','updates'].includes(c.op)) throw Error(`Messaging is disabled for frame ${this.id}`);
     switch(c.op) {
       case 'status': return {id:this.id,pid:process.pid,messaging:this.messaging, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.messaging ? this.store.updates() : [], work:await this.harness.inspect(ctx)};
+      case 'pane-start': {
+        if(typeof c.name!=='string' || typeof c.target!=='string') throw Error('Supply PANE=<name> and TARGET=<make-target>');
+        if(c.source!=='frame' && c.source!=='shared') throw Error('Pane targets must come from the frame or shared Makefile');
+        const receipt=startPane(this.id,c.name,c.target,c.source);
+        this.hasLaunchedPanes=true;
+        return receipt;
+      }
+      case 'pane-list': return listFramePanes(this.id);
+      case 'pane-stop': {
+        if(typeof c.name!=='string') throw Error('Supply PANE=<name>');
+        stopPane(this.id,c.name);
+        return {stopped:true};
+      }
       case 'model': {
         const errors=c.modelId===undefined?await refreshModels(this.models):[];
         if(c.modelId !== undefined) {
@@ -221,7 +236,10 @@ export class Frame {
         }
         return {stopped:true};
       }
-      case 'close': await this.close(); return {closed:true};
+      case 'close': {
+        if(c.pane!==undefined && c.pane!==process.env.TMUX_PANE) throw Error('The selected frame terminal has changed');
+        await this.close(); return {closed:true};
+      }
       case 'memory': {
         if (c.field === undefined) return this.harness.snapshot(Memory,this.conversation.id,ctx);
         if (!['responsibilities','notes','decisions','outstanding','sources'].includes(String(c.field))) throw Error('Unknown memory field');
@@ -285,7 +303,10 @@ export class Frame {
     this.closure=(async()=>{
       clearInterval(this.timer);
       this.server?.close();
-      try { await this.admissions; await this.ticking; }
+      try {
+        await this.admissions; await this.ticking;
+        if(this.hasLaunchedPanes) closeFramePanes(this.id);
+      }
       finally {
         try { await this.harness?.close(ctx); }
         finally {

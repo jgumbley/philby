@@ -9,5 +9,8 @@ help:
 	@echo 'Runtime: make -C "$(ROOT)"; frame, frame-new, frame-list, window, quit and cleanup'
 deps build check:
 	@$(MAKE) --no-print-directory -C "$(ROOT)" $@
+.PHONY: reload-controls
+reload-controls: build
+	@node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" reload-controls
 test: build
 	@cd "$(ROOT)" && node --test dist/tmux/test/*.test.js

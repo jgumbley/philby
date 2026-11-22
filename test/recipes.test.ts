@@ -66,6 +66,21 @@ test('failed scaffolding leaves no partial frame tools and can be retried',()=>{
   assert.equal(existsSync(join(p.tools,'Makefile')),false);
 });
 
+test('saved frames reopen after their creation recipe is retired',()=>{
+  const p=paths('retained');
+  mkdirSync(p.tools,{recursive:true});
+  writeFileSync(join(p.tools,'.frame-type'),'retired\n');
+  writeFileSync(join(p.tools,'Makefile'),'check:\n\t@echo local\n');
+  writeFileSync(join(p.tools,'SCOPE.md'),'Local scope');
+  prepare('retained');
+  prepare('retained','retired');
+  assert.equal(readFileSync(join(p.tools,'.frame-type'),'utf8'),'retired\n');
+  assert.equal(readFileSync(join(p.tools,'Makefile'),'utf8'),'check:\n\t@echo local\n');
+  assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Local scope');
+  assert.throws(()=>prepare('retained','plain'),/already exists with type retired/);
+  assert.throws(()=>prepare('new-frame','retired'),/Unknown frame type/);
+});
+
 test('legacy frame scope requires explicit migration and preserves edited tools',()=>{
   const p=paths('legacy');mkdirSync(p.tools,{recursive:true});
   writeFileSync(join(p.tools,'AGENTS.md'),'Existing instructions');

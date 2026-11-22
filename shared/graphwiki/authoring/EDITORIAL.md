@@ -4,7 +4,7 @@ Articles explain concepts. Journals retain evidence, source references,
 attribution, quotations, comparisons between sources and research chronology.
 Journal entries identify the articles they inform; articles do not link back
 to journals or carry provenance metadata. Keep uncertainty and limitations in
-the article without narrating who said what. Read `SCOPE.md` for the editorial
+the article without narrating who said what. Read [the authoring guidance](AUTHORING.md) for the editorial
 review required before publishing.
 
 ## Commands
@@ -42,18 +42,4 @@ An operational incident playbook or open source component is not itself a
 source attribution. Do not remove meaningful subject vocabulary to satisfy
 a superficial keyword check.
 
-Inspect new tools first with `make help` and `make editorial-check`. Verify
-changes manually through these Make targets using a temporary copy of the
-recipe with isolated Markdown fixtures. Exercise a clean concept, provenance
-in an article, the same provenance in a journal, a proposed replacement and
-a rejected publication. Do not add automated tests for this frame workflow.
-
-## Existing frames
-
-The recipe is copied only at frame creation. Update an existing frame's scope,
-Make targets and editorial tool deliberately, preserving its local tools and
-viewer configuration. Close the frame before editing its graph; reopen it to
-load scope changes. Never edit completed publication drafts or recovery state.
-Clean existing articles in a new publication, preserving their evidence in
-the journal. Publishing does not delete or rename articles; do not bypass it
-with manual deletion to remove a source summary.
+Verify changes manually with an isolated temporary graph. Exercise a clean concept, provenance in an article, the same provenance in a journal, a proposed replacement and a rejected publication. Existing Graphwiki frames retain their local editorial tools and viewer configuration.

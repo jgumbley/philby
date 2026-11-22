@@ -18,7 +18,11 @@ make cleanup
 
 Bare `make` opens the frame selector, starting the tmux workspace if needed. With no saved frames, it asks for a type and frame ID. Cancelling creates no frame or conversation state. There is no built-in coordinator; every agent is an explicitly named ordinary frame. `philby` is the tmux session name. Reopening the selector focuses its existing window.
 
-Each agent has one tmux window; its window name and pane title equal its frame ID. Opening an existing frame focuses it. Concurrent openings share a launch lock, preserving one application process per frame ID. `Ctrl-b d` detaches while processes keep running. `cleanup` gracefully closes owned processes without deleting state or tools.
+Each frame has an agent window marked 📡 in cyan. Its named process windows follow immediately, marked 🖥️ in lavender. Starting one keeps the operator’s focus in place. The operator can switch to the program, use its terminal, and press Enter after it exits to run it again. Opening a running frame focuses its agent. Detaching keeps the processes running. Closing the frame stops its panes and retains their logs.
+
+If the agent is forcibly killed before it can close its panes, reopening that frame removes its leftover pane processes. The agent can then decide which to start again.
+
+Ctrl-C in a frame or one of its process panes opens a full-screen close confirmation. No is selected initially. Use Left or Right to choose, Enter to apply, or Escape to return. Closing a frame also closes its panes. A program that has already exited with an error can leave a “Pane is dead” window for inspection. The same Ctrl-C action dismisses it.
 
 `make -C shared browser-connect BROWSER=chrome` or `BROWSER=firefox` opens a dedicated `@browser-chrome` or `@browser-firefox` service pane. Its foreground Puppeteer process keeps the connection open and prints the active caller and queue count. Shared `browser-status` reports that state directly. These tmux panes have no agent conversation or Durable store. `browser-disconnect` stops the selected service; workspace cleanup stops all browser services before shutting down tmux. Browser windows and tabs remain open. See the [browser lifecycle](../shared/browser/README.md).
 

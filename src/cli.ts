@@ -10,7 +10,7 @@ import { models } from './models.js';
 import { modelReference } from './providers.js';
 import { Frame, capture, ctx, migrateFrameSettings } from './frame.js';
 import { selectFrame, startTui } from './tui.js';
-import { openFrame, openSelector, listViews, openShell, closeBrowsers, stopServer } from '../tmux/index.js';
+import { openFrame, openSelector, listViews, openShell, closeBrowsers, stopServer, installCloseBinding } from '../tmux/index.js';
 import { Harness, createRegistry } from '@earendil-works/pi-durable';
 import { createModels } from '@earendil-works/pi-ai';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
@@ -54,6 +54,7 @@ async function main() {
   for(const key of ['id','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) delete process.env[key];
   if(command==='name') return selectFrame(openFrame,await Promise.all(saved().sort().map(async id=>({id,running:!!await running(id),lastUsed:lastUsed(id)}))),frameTypes());
   if(command==='new') return openSelector();
+  if(command==='reload-controls') return installCloseBinding();
   if(command==='open') return destination?openFrame(validateFrameId(destination),type):openSelector();
   if(command==='send' || command==='report') return send(destination,command==='report'?'update':'input');
   if(command==='list') {
@@ -141,6 +142,8 @@ async function main() {
     try {console.log(JSON.stringify(await capture(await h.root(ctx),process.env.ALL==='1'),null,2));}finally{await h.close(ctx);release();}return;
   }
   const op:Record<string,unknown>={op:command==='new-session'?'new':command};
+  if(command==='pane-start') Object.assign(op,{name:process.env.PANE,target:process.env.TARGET,source:process.env.PANE_SOURCE || 'frame'});
+  if(command==='pane-stop') op.name=process.env.PANE;
   if(command==='thinking') {
     if(!process.env.LEVEL) throw Error('Supply LEVEL=off|minimal|low|medium|high|xhigh|max|default');
     op.level=process.env.LEVEL==='default'?null:process.env.LEVEL;

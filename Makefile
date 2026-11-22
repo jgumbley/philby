@@ -60,6 +60,8 @@ window quit cleanup: build
 check: deps
 	@npm run check
 	$(success)
+.PHONY: lint
+lint: check
 test: build
 	@npm test
 	$(success)
@@ -87,7 +89,7 @@ help:
 	@echo 'frame-messaging id=<id> [ENABLED=true|false] — inspect messaging; change it while the frame is closed'
 	@echo 'deps-update — refresh the npm lockfile for package.json, then install the locked dependencies'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
-	@echo 'make — create/open frame chooser; make frame id=<id> [TYPE=plain|graphwiki] — create or resume'
+	@echo 'make — create/open frame chooser; make frame id=<id> — create or resume'
 	@echo 'Navigation: Ctrl-End / Ctrl-Home; macOS Kitty: Cmd-Option-Right / Cmd-Option-Left (requires allow_remote_control yes)'
 	@echo 'frame-migrate [INPUT=old-directory] — rename panes/ to frames/ in place; PHILBY_FRAMES_DIR selects destination'
 	@echo 'frame-new — select a saved frame or New frame; frame-list — saved agents and every live tmux view'

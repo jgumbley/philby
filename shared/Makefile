@@ -29,7 +29,7 @@ override export RANGE := $(value RANGE)
 override export MAX_BYTES := $(value MAX_BYTES)
 override export MAX_SLIDES := $(value MAX_SLIDES)
 BROWSER_TOOLS := browser-connect browser-disconnect browser-status browser-tabs browser-run
-WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse
+WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse wiki-pane-view
 GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login google-workspace-diagnose google-workspace-read google-workspace-spaces google-workspace-messages google-workspace-export google-workspace-download google-workspace-check google-workspace-test
 .PHONY: help ask reason twitter $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
 help:
@@ -69,6 +69,16 @@ help:
 ask reason twitter:
 	@$(MAKE) --no-print-directory -C "$(ROOT)" build
 	@ROUTE=$@ node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" consult
+.PHONY: pane-start pane-list pane-stop wiki-pane
+pane-start pane-stop: override export PANE := $(value PANE)
+pane-start: override export TARGET := $(value TARGET)
+pane-start: override export PANE_SOURCE := $(value PANE_SOURCE)
+pane-start pane-list pane-stop: override MAKEOVERRIDES :=
+pane-start pane-list pane-stop:
+	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build
+	@node --disable-warning=ExperimentalWarning "$(ROOT)/dist/src/cli.js" $@
+wiki-pane:
+	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/Makefile" pane-start PANE=wiki TARGET=wiki-pane-view PANE_SOURCE=shared
 $(BROWSER_TOOLS) browser-check browser-test:
 	@$(MAKE) --no-print-directory -f "$(ROOT)/shared/browser/Makefile" $(@:browser-%=%)
 .PHONY: ocr ocr-diagnose ocr-check ocr-test

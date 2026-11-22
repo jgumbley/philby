@@ -27,9 +27,14 @@ help:
 wiki-context wiki-publish wiki-index wiki-lint:
 	@node "$(MODULE)/wiki.mjs" $(@:wiki-%=%)
 
-.PHONY: wiki-browse update-lock
+.PHONY: wiki-browse wiki-pane-view update-lock
 wiki-browse:
 	@node "$(MODULE)/wiki.mjs" browse
+
+wiki-pane-view:
+	@[[ -n "$${PHILBY_FRAME:-}" && "$$PWD" -ef "$${PHILBY_FRAMES_DIR:?}/$$PHILBY_FRAME" ]] || { echo 'The wiki pane must run in its owning frame' >&2; exit 1; }
+	@if [[ ! -e wiki && ! -L wiki ]]; then mkdir -p wiki/pages; fi
+	@$(MAKE) --no-print-directory -f "$(MODULE)/Makefile" wiki-browse GRAPH_ROOT=wiki
 
 update-lock:
 	$(CARGO) update --workspace

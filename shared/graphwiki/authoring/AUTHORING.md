@@ -1,11 +1,11 @@
-# Graphwiki scope
+# Graphwiki authoring
 
 Maintain a subject wiki in `wiki/`. Several source frames may contribute material.
 The receiving frame is identified by its immutable ID; this frame owns its graph.
 Develop the subject and editorial conventions with the user. Do not invent a
 taxonomy or seed research content when the frame opens.
 
-Read this frame's Makefile and run `make help` before using its tools. Use
+Read the frame and shared Makefiles before using their tools. Use
 `make context` with `PROMPT_FILE`, `prompt`, or stdin to find relevant pages.
 Consolidate useful material into linked understanding. Preserve attribution and
 derivation history in the journal; preserve material uncertainty, disagreements
@@ -67,12 +67,11 @@ while publication is pending. Retain drafts and `wiki/.graphwiki/` for recovery.
 The graph engine and its documentation live in `shared/graphwiki/` under the
 Philby root.
 
-Use `make browse` to inspect the published graph in the local read-only
-terminal browser. It offers Wiki and Journal views without a web service.
+The wiki pane shows the published graph in Wiki and Journal views.
 
 ## Turn context into useful concepts
 
-Work toward the purpose stated in this scope and the current request.
+Work toward the purpose stated in the frame’s scope and the current request.
 Express it as what the reader should become able to understand, decide,
 or do. If inferred, state the assumption; revise it as understanding develops.
 

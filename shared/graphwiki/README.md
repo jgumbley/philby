@@ -33,11 +33,7 @@ tree-sitter resolution.
 
 ## Read-only terminal browser
 
-Run `make browse` from a Graphwiki frame, or from the Philby root:
-
-```sh
-make -C shared wiki-browse GRAPH_ROOT=/absolute/path/to/wiki
-```
+The shared `wiki-pane` target starts this viewer in a frame-owned tmux pane. The viewer reads the owning frame's `wiki/` graph. A first launch creates an empty `wiki/pages/` if the graph is missing. Existing graphs open in place.
 
 Wiki lists articles; Journal lists daily evidence newest first. Click an article,
 `[[wikilink]]`, relative Markdown document link, or backlink to navigate. Click
@@ -53,10 +49,7 @@ Enter follow it, arrows and PageUp/PageDown scroll, `r` reload published content
 while loading; an open browser does not block subsequent publication. There is
 no HTTP server, service installation or background viewer lifecycle.
 
-The Graphwiki frame scope keeps sourcing and attribution only in dated journals.
-Articles explain concepts and their uncertainty; journal entries link to the
-articles they inform. These conventions do not impose citation requirements on
-the shared engine.
+Each frame sets its own editorial conventions. For journal-only sourcing, a frame can include `$(PHILBY_ROOT)/shared/graphwiki/authoring/authoring.mk` in its own Makefile and adopt the [authoring guidance](authoring/AUTHORING.md) and [editorial checks](authoring/EDITORIAL.md). Saved frames using the retired Graphwiki creation recipe already have local copies of their tools and guidance.
 
 Clippy limits cognitive complexity to 9, functions to four arguments and fifty
 lines, and applies the other thresholds in `.clippy.toml`. Mozilla's

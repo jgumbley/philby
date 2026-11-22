@@ -1,13 +1,13 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
-import { root, framesRoot, runtimeDir, prepare, markUsed } from '../src/store.js';
+import { root, framesRoot, runtimeDir, prepare, markUsed, paths, validateFrameId } from '../src/store.js';
 import { invocationEnvironment, piAgentDir } from '../src/config.js';
-import { running } from '../src/ipc.js';
+import { request, running } from '../src/ipc.js';
 import { installKittyNavigation } from './kitty.js';
 import { withTmuxPassthrough } from './kitty-route.js';
 
@@ -18,9 +18,9 @@ type BrowserView = {name:BrowserName;pane:string;pid:number;dead:boolean};
 const launcher=fileURLToPath(new URL('../src/launch.js',import.meta.url));
 const server=()=>process.env.PHILBY_TMUX_SOCKET || `philby-${createHash('sha256').update(framesRoot).digest('hex').slice(0,12)}`;
 const launchDirectory=()=>join(runtimeDir,`launch-${createHash('sha256').update(server()).digest('hex').slice(0,16)}`);
-let environmentFile:string|undefined;
-function tmux(args:string[], allowFailure=false) {
-  const result=spawnSync('tmux',['-L',server(),'-f',join(root,'tmux','philby.conf'),...args],{encoding:'utf8'});
+const environmentFiles=new Map<boolean,string>();
+function tmux(args:string[], allowFailure=false,timeout?:number) {
+  const result=spawnSync('tmux',['-L',server(),'-f',join(root,'tmux','philby.conf'),...args],{encoding:'utf8',timeout});
   if(result.error) throw result.error;
   if(!allowFailure && result.status!==0) throw Error(result.stderr || String(result.error));
   return result;
@@ -31,17 +31,29 @@ function paneList(format:string) {
   return result.stdout;
 }
 const quote=(s:string)=>`'${s.replaceAll("'", "'\\''")}'`;
-function launch(action:string,id?:string) {
+function launch(action:string,...args:string[]) {
+  const owned=action==='pane-run';
+  let environmentFile=environmentFiles.get(owned);
   if(!environmentFile) {
-    const env:NodeJS.ProcessEnv={...invocationEnvironment,PHILBY_ROOT:root,PHILBY_FRAMES_DIR:framesRoot,PHILBY_TMUX_SOCKET:server(),PI_CODING_AGENT_DIR:piAgentDir};
-    for(const key of ['id','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL','PHILBY_FRAME']) delete env[key];
+    const env:NodeJS.ProcessEnv={...(owned?process.env:invocationEnvironment),PHILBY_ROOT:root,PHILBY_FRAMES_DIR:framesRoot,PHILBY_TMUX_SOCKET:server(),PI_CODING_AGENT_DIR:piAgentDir};
+    for(const key of ['id','TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) delete env[key];
+    if(!owned) delete env.PHILBY_FRAME;
     mkdirSync(launchDirectory(),{recursive:true,mode:0o700});
     environmentFile=join(launchDirectory(),`${randomUUID()}.json`);
     writeFileSync(environmentFile,JSON.stringify(env),{flag:'wx',mode:0o600});
+    environmentFiles.set(owned,environmentFile);
   }
-  return [process.execPath,'--disable-warning=ExperimentalWarning',launcher,environmentFile,action,...(id?[id]:[])].map(quote).join(' ');
+  return [process.execPath,'--disable-warning=ExperimentalWarning',launcher,environmentFile,action,...args].map(quote).join(' ');
 }
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
+export function installCloseBinding() {
+  tmux(['set-option','-g','@philby_close_view',launch('close-view'),';',
+    'source-file',join(root,'tmux','close.conf')]);
+}
+function installControls() {
+  tmux(['set-option','-g','@philby_new_window',launch('new')]);
+  installCloseBinding();
+}
 function openingLock() {
   mkdirSync(runtimeDir,{recursive:true,mode:0o700});
   const mutex=new DatabaseSync(join(runtimeDir,'open.sqlite'));mutex.exec('PRAGMA busy_timeout=15000; BEGIN EXCLUSIVE');
@@ -64,24 +76,25 @@ export async function openFrame(id:string,type?:string) {
   try {
     prepare(id,type);
     const current=await running(id);
-    const windows=tmux(['list-windows','-t','philby','-F','#{window_id}\t#{window_name}'],true).stdout || '';
-    const existing=windows.split('\n').find(s=>s.split('\t')[1]===id)?.split('\t')[0];
+    const existing=ownerWindow(id);
     if(current) {if(!existing) throw Error(`${id} is running without a tmux view`); target=existing;}
     else {
+      closeFramePanes(id);
       if(existing) tmux(['kill-window','-t',existing],true);
       const command=launch('serve',id);
       const has=tmux(['has-session','-t','philby'],true).status===0;
       target=tmux(has?['new-window','-d','-P','-F','#{window_id}','-t','philby:','-n',id,'-c',root,command]:['new-session','-d','-P','-F','#{window_id}','-s','philby','-n',id,'-c',root,command]).stdout.trim();
       tmux(['select-pane','-t',target,'-T',id]);
+      const pane=tmux(['display-message','-p','-t',target,'#{pane_id}']).stdout.trim();
+      identifyOwner(target,pane,id);
       let ready=false;
       for(let i=0;i<200;i++) {if(await running(id)){ready=true;break;}await sleep(100);}
       if(!ready) {const capture=tmux(['capture-pane','-p','-t',target],true).stdout;throw Error(`Frame ${id} failed to start. ${capture}`);}
     }
-    tmux(['set-option','-g','@philby_new_window',launch('new')]);
+    installControls();
     tmux(['select-window','-t',target]);
-    const view=tmux(['list-panes','-t',target,'-F','#{pane_id}\t#{pane_title}']).stdout.trim().split('\n').filter(line=>line.split('\t')[1]===id);
-    if(view.length!==1) throw Error(`Expected one agent view for ${id}`);
-    tmux(['select-pane','-t',view[0].split('\t')[0]]);
+    const agent=tmux(['show-options','-wqv','-t',target,'@philby_agent']).stdout.trim();
+    tmux(['select-pane','-t',agent]);
     markUsed(id);
   } finally {mutex.close();}
   await attach(id);
@@ -96,7 +109,7 @@ export async function openSelector() {
       const command=launch('name');
       target=tmux(has?['new-window','-d','-P','-F','#{window_id}','-t','philby:','-n','+','-c',root,command]:['new-session','-d','-P','-F','#{window_id}','-s','philby','-n','+','-c',root,command]).stdout.trim();
     }
-    tmux(['set-option','-g','@philby_new_window',launch('new')]);
+    installControls();
     tmux(['select-window','-t',target]);
   } finally {mutex.close();}
   if(process.stdin.isTTY) await attach('+');
@@ -106,6 +119,119 @@ export function listViews() {
 }
 export function openShell() {
   tmux(['new-window','-t','philby:','-c',root]);
+}
+type PaneSource = 'frame' | 'shared';
+function paneName(name:string) {
+  if(typeof name!=='string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) throw Error('Pane name must be 1–64 lowercase letters, digits or hyphens, beginning with a letter or digit');
+  return name;
+}
+function paneRecipe(name:string,target:string,source:PaneSource) {
+  paneName(name);
+  if(typeof target!=='string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(target)) throw Error('Supply a named Make target');
+  if(source!=='frame' && source!=='shared') throw Error('Pane source must be frame or shared');
+}
+function identifyOwner(window:string,pane:string,id:string) {
+  tmux(['set-option','-w','-t',window,'@philby_frame',id,';',
+    'set-option','-w','-t',window,'@philby_agent',pane]);
+}
+function ownerWindow(id:string) {
+  const rows=paneList('#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_title}\t#{@philby_frame}\t#{@philby_agent}\t#{@philby_pane}\t#{pane_start_command}').split('\n').map(line=>line.split('\t'));
+  const found=rows.filter(([session,,name,pane,title,frame,agent,child,command])=>session==='philby' && !child && (
+    (frame===id && agent===pane) || (!frame && name===id && title===id && command.includes(launcher) && command.includes(quote('serve')))
+  ));
+  if(found.length>1) throw Error(`Multiple agent windows for ${id}`);
+  const row=found[0];
+  if(row && !row[5]) identifyOwner(row[1],row[3],id);
+  return row?.[1];
+}
+function paneLog(id:string,name:string) {
+  return join(paths(id).tools,'panes',paneName(name),'out.log');
+}
+export function listFramePanes(id:string) {
+  validateFrameId(id);
+  const format='#{session_name}\t#{@philby_frame}\t#{window_id}\t#{pane_id}\t#{@philby_view}\t#{@philby_pane}\t#{@philby_target}\t#{@philby_source}';
+  return paneList(format).split('\n').flatMap(line=>{
+    const [session,owner,window,pane,view,name,target,source]=line.split('\t');
+    return session==='philby' && owner===id && pane===view && name ? [{name,window,pane,target,source,log:paneLog(id,name)}] : [];
+  });
+}
+export function startPane(id:string,name:string,target:string,source:PaneSource='frame') {
+  validateFrameId(id);
+  paneRecipe(name,target,source);
+  const owner=ownerWindow(id);
+  if(!owner) throw Error(`Frame ${id} has no agent window`);
+  const views=listFramePanes(id);
+  const existing=views.find(view=>view.name===name);
+  const log=paneLog(id,name);
+  if(existing) {
+    if(existing.target!==target || existing.source!==source) throw Error(`Pane ${name} already uses a different Make target`);
+    return {name,pane:existing.pane,log,started:false};
+  }
+  for(const directory of [dirname(dirname(log)),dirname(log)]) {
+    mkdirSync(directory,{recursive:true,mode:0o700});
+    if(!lstatSync(directory).isDirectory()) throw Error(`Pane directory must be a directory: ${directory}`);
+  }
+  const fd=openSync(log,constants.O_APPEND|constants.O_CREAT|constants.O_WRONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK,0o600);
+  try {
+    const stat=fstatSync(fd);
+    if(!stat.isFile() || stat.nlink!==1) throw Error(`Pane log must be a regular file with a single link: ${log}`);
+    fchmodSync(fd,0o600);
+  } finally {closeSync(fd);}
+  const anchor=views.at(-1)?.window ?? owner;
+  const channel=`philby-pane-${randomUUID()}`;
+  const pane=tmux(['new-window','-adP','-F','#{pane_id}','-t',anchor,'-n',name,'-c',paths(id).tools,launch('pane-run',id,name,target,source,channel)]).stdout.trim();
+  try {
+    tmux(['set-option','-w','-t',pane,'@philby_frame',id,';',
+      'set-option','-w','-t',pane,'@philby_pane',name,';',
+      'set-option','-w','-t',pane,'@philby_target',target,';',
+      'set-option','-w','-t',pane,'@philby_source',source,';',
+      'set-option','-w','-t',pane,'@philby_view',pane,';',
+      'select-pane','-t',pane,'-T',name,';',
+      'pipe-pane','-O','-t',pane,`exec cat >> #{q:pane_start_path}/panes/${name}/out.log`,';',
+      'wait-for','-S',channel,';','wait-for',channel+'-ready'],false,3000);
+    const error=tmux(['show-options','-pqv','-t',pane,'@philby_launch_error']).stdout.trim();
+    if(error) throw Error(error);
+  } catch(error) {
+    tmux(['kill-window','-t',pane],true);
+    throw Error(`Could not start pane ${name}: ${error instanceof Error?error.message:error}. See ${log}`);
+  }
+  return {name,pane,log,started:true};
+}
+export function stopPane(id:string,name:string) {
+  paneName(name);
+  const view=listFramePanes(id).find(view=>view.name===name);
+  if(!view) throw Error(`Frame ${id} has no pane named ${name}`);
+  removePane(view.pane);
+}
+function removePane(pane:string) {
+  const result=tmux(['kill-pane','-t',pane],true);
+  if(result.status!==0 && paneList('#{pane_id}').split('\n').includes(pane)) throw Error(result.stderr);
+}
+export function closeFramePanes(id:string) {
+  for(const view of listFramePanes(id)) removePane(view.pane);
+}
+export async function closeView(id:string,pane:string,kind:'frame'|'pane') {
+  validateFrameId(id);
+  if(!/^%\d+$/.test(pane)) throw Error('Expected a tmux pane ID');
+  const mutex=openingLock();
+  let closing:Promise<unknown>|undefined;
+  try {
+    const row=paneList('#{session_name}\t#{pane_id}\t#{@philby_frame}\t#{@philby_agent}\t#{@philby_view}\t#{pane_dead}')
+      .split('\n').map(line=>line.split('\t')).find(([session,target,owner])=>session==='philby' && target===pane && owner===id);
+    if(!row) return;
+    const [,,,agent,view,dead]=row;
+    if(kind==='frame' ? agent!==pane : view!==pane) throw Error('Selected terminal ownership changed');
+    if(kind==='frame' && dead==='0' && await running(id)) {
+      closing=request(id,{op:'close',pane});
+    } else {
+      if(kind==='frame') closeFramePanes(id);
+      removePane(pane);
+    }
+  } finally {mutex.close();}
+  if(closing) {
+    await closing;
+    removePane(pane);
+  }
 }
 export function browserViews():BrowserView[] {
   return paneList('#{session_name}\t#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{@philby_browser}').trim().split('\n').flatMap(line=>{
@@ -141,7 +267,7 @@ export function openBrowser(name:BrowserName,command:string[],cwd:string):{pane:
       tmux(['set-option','-p','-t',pane,'@philby_browser',name]);
     }
     tmux(['select-pane','-t',pane,'-T',title]);
-    tmux(['set-option','-g','@philby_new_window',launch('new')]);
+    installControls();
     tmux(['select-window','-t',pane]);
     tmux(['select-pane','-t',pane]);
     return {pane,started};
@@ -206,5 +332,5 @@ export async function closeBrowsers() {
 export function stopServer() {
   tmux(['kill-server'],true);
   rmSync(launchDirectory(),{recursive:true,force:true});
-  environmentFile=undefined;
+  environmentFiles.clear();
 }

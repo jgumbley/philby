@@ -172,21 +172,9 @@ Every frame can use shared tools, even with an empty local toolset. Its first mo
 
 Native `read`, `edit`, `write` and `bash` tools run in the frame's directory. Purpose-specific operations and diagnostics run through reusable Make targets: `make target` for frame tools or `make -C "$PHILBY_ROOT/shared" target` for shared tools. Namespaces organise tools; they are not a filesystem sandbox.
 
-Frame types are creation recipes. `make frame id=knowledge TYPE=graphwiki` creates a frame with graph tools; omitting `TYPE` creates a plain frame. Each recipe provides an initial `SCOPE.md`. Reopening preserves edited files and never reapplies the recipe. Requesting a different type for an existing frame fails. Creating a mailbox alone does not choose a type.
+Frame types supply the initial files for a new workspace. A frame keeps its own scope, tools and saved conversation when reopened, even after its creation recipe is retired.
 
-Graphwiki frames record all sourcing, attribution and references only in dated
-journals at write time, then maintain concept articles as the wiki reading view.
-Articles link to related concepts and retain material uncertainty; they contain
-no provenance metadata, journal links or source narration. Journal entries link
-to the articles they inform. The frame's `editorial-check` target checks common
-provenance markers before publication and during `lint`; manual editorial review
-is still required. See the recipe's [editorial interface](frame-types/graphwiki/EDITORIAL.md).
-Existing frames need their scope and tools updated explicitly, then reopening to
-load the new scope; creation recipes are never reapplied automatically.
-Use `make browse` in a Graphwiki frame for the local read-only terminal browser.
-Wiki and Journal views have clickable links and backlinks. No web service starts
-when a frame opens. Frame-specific HTML previews remain ordinary local tools.
-See the [graphwiki module](shared/graphwiki/README.md) for terminal controls.
+Any running frame can host a Graphwiki pane. The first launch creates an empty graph in the frame's `wiki/` directory if it is missing. The operator can switch between the agent and the read-only Wiki and Journal views. The frame owns its articles, journal and editorial decisions. Existing frames created with the former Graphwiki recipe continue to use their local files. See the [Graphwiki module](shared/graphwiki/README.md) for viewer controls and authoring guidance.
 
 An optional nonempty `BOOT.md` queues an opening checklist behind recovered work. Its unfinished task resumes without duplicate submission. A frame with `BOOT.md` must supply a `make close` target for teardown. Closure suspends Durable work first, then awaits teardown with a 60-second deadline. Failures are reported while application resources are released. Detaching leaves work running.
 
@@ -273,7 +261,7 @@ Each frame lives entirely under `frames/<id>/`: its scope, Makefile, tools, work
 
 ### Renaming existing panes to frames
 
-A frame is Philby's persistent conversational operator and its complete working context: scope, tools, memory, conversation and mailbox. The name replaces Philby's former “pane”; tmux still calls its terminal subdivisions panes.
+A frame is Philby's persistent conversational operator and its complete working context: scope, tools, memory, conversation and mailbox. Older releases called the agent a “pane”. In current releases a pane hosts a process owned by a frame.
 
 ```sh
 make frame-migrate
