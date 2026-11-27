@@ -26,6 +26,7 @@ test('shared search uses the calling frame, preserves literal prompt inputs and 
       assert.equal(new Headers(options.headers).get('authorization'),'Bearer fixture-key');
       const request=JSON.parse(options.body);
       assert.equal(request.tools[0].type,'openrouter:web_search');
+      assert.ok(request.messages[0].content.includes(new Date().toISOString().slice(0,10)+' UTC'));
       assert.equal(request.messages.at(-1).content,process.env.EXPECTED_QUERY);
       if(process.env.FAIL_SEARCH) return new Response(null,{status:503});
       const citation={type:'url_citation',url_citation:{title:'Replay rules',url:'https://docs.example/replay',content:'Recorded evidence'}};

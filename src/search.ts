@@ -9,6 +9,7 @@ export async function searchOpenRouter(query:string):Promise<SearchResult[]> {
   const credentials=await runtime.getAuth('openrouter');
   const key=credentials?.auth.apiKey;
   if(!key) throw Error('Search requires OpenRouter credentials in Pi or OPENROUTER_API_KEY');
+  const today=new Date().toISOString().slice(0,10);
   const response=await fetch('https://openrouter.ai/api/v1/chat/completions',{
     method:'POST',
     headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
@@ -16,7 +17,7 @@ export async function searchOpenRouter(query:string):Promise<SearchResult[]> {
     body:JSON.stringify({
       model:'openai/gpt-4.1-mini',
       messages:[
-        {role:'system',content:'Search the web once using the user’s exact query. Reply only with “Done” after searching.'},
+        {role:'system',content:`Today is ${today} UTC. Search thoroughly`},
         {role:'user',content:query}
       ],
       tools:[{type:'openrouter:web_search',parameters:{engine:'exa',max_results:5,max_characters:750,max_uses:1}}],
