@@ -1,10 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, mkdtempSync, cpSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { root } from './config.js';
-import { readFrameSettings } from './frame-config.js';
 
 export { root };
 if(process.env.PHILBY_HOME) throw Error('PHILBY_HOME is no longer supported; use PHILBY_FRAMES_DIR for complete frame directories');
@@ -84,59 +83,6 @@ export function lock(id: string) {
   try { db.exec('BEGIN EXCLUSIVE'); } catch (error) { db.close(); if((error as {errcode:number}).errcode===5) throw Error(`Frame ${id} is already running`); throw error; }
   return () => db.close();
 }
-export type Envelope = { id: string; from: string; to: string; content: string; kind: 'input' | 'update'; mode: 'steer' | 'followUp' };
-export function messagingEnabled(id:string) {
-  return readFrameSettings(paths(id).tools)?.messaging === true;
-}
-export class Store {
-  db: DatabaseSync;
-  constructor(readonly id: string) {
-    const state=paths(id).state;
-    mkdirSync(state,{recursive:true,mode:0o700});
-    this.db = new DatabaseSync(join(state, 'app.sqlite'));
-    try {this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-      CREATE TABLE IF NOT EXISTS inbox (id TEXT PRIMARY KEY, body TEXT NOT NULL, placed INTEGER NOT NULL DEFAULT 0);
-      CREATE TABLE IF NOT EXISTS updates (id TEXT PRIMARY KEY, body TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0);`);
-    } catch(error) {this.db.close();throw error;}
-  }
-  accept(e: Envelope) {
-    validateFrameId(e.from); validateFrameId(e.to);
-    if (e.to !== this.id) throw Error('Wrong receiving frame');
-    if (!e.id || !e.content.trim()) throw Error('Request ID and nonempty content required');
-    if(!['input','update'].includes(e.kind) || !['steer','followUp'].includes(e.mode)) throw Error('Invalid message kind or mode');
-    for(const id of new Set([e.from,e.to])) if(!messagingEnabled(id)) throw Error(`Messaging is disabled for frame ${id}`);
-    const body = JSON.stringify(e);
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      const prior = this.db.prepare('SELECT body FROM inbox WHERE id=?').get(e.id);
-      if (prior && prior.body !== body) throw Error('Request ID conflict in receiving frame');
-      this.db.prepare('INSERT OR IGNORE INTO inbox(id,body) VALUES (?,?)').run(e.id, body);
-      this.db.exec('COMMIT');
-      return e.id;
-    } catch(error) {this.db.exec('ROLLBACK');throw error;}
-  }
-  pending(): Envelope[] {
-    return this.db.prepare('SELECT body FROM inbox WHERE placed=0 ORDER BY rowid').all().map(r => JSON.parse(String(r.body)));
-  }
-  placed(e: Envelope) {
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      if (e.kind === 'update') this.db.prepare('INSERT OR IGNORE INTO updates(id,body) VALUES (?,?)').run(e.id, JSON.stringify(e));
-      this.db.prepare('UPDATE inbox SET placed=1 WHERE id=?').run(e.id);
-      this.db.exec('COMMIT');
-    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
-  }
-  updates(mark = false) {
-    const rows = this.db.prepare('SELECT body,seen FROM updates ORDER BY rowid').all();
-    if (mark) this.db.exec('UPDATE updates SET seen=1');
-    return rows.map(r => ({ ...JSON.parse(String(r.body)), seen: !!r.seen }));
-  }
-  close() { this.db.close(); }
-}
-export function envelope(from: string, to: string, content: string, options: Partial<Envelope> = {}): Envelope {
-  return { id: randomUUID(), from: validateFrameId(from), to: validateFrameId(to), content, kind: 'input', mode: 'followUp', ...options };
-}
-
 export function locked(id: string) {
   const path=join(paths(id).state,'lock.sqlite');
   if(!existsSync(path)) return false;

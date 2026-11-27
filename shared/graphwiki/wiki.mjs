@@ -20,11 +20,11 @@ export function graphLock(graph) {
 
 async function main() {
   const operation = process.argv[2];
-  if (!['context', 'publish', 'index', 'lint', 'browse'].includes(operation)) throw Error('Unknown wiki operation');
+  if (!['context', 'publish', 'index', 'lint', 'browse', 'journal'].includes(operation)) throw Error('Unknown wiki operation');
   if (!process.env.GRAPH_ROOT) throw Error('GRAPH_ROOT is required');
   const graph = realpathSync(process.env.GRAPH_ROOT);
-  const argument = operation === 'context' ? prompt() : operation === 'publish' ? process.env.CHANGE || '' : '';
-  if (['context', 'publish'].includes(operation) && !argument.trim()) throw Error(operation === 'context' ? 'Nonempty search prompt required' : 'CHANGE is required');
+  const argument = ['context', 'journal'].includes(operation) ? prompt() : operation === 'publish' ? process.env.CHANGE || '' : '';
+  if (['context', 'journal', 'publish'].includes(operation) && !argument.trim()) throw Error(operation === 'context' ? 'Nonempty search prompt required' : 'CHANGE is required');
   const lock = graphLock(graph);
   const engine = fileURLToPath(new URL('./', import.meta.url));
   await new Promise((resolve, reject) => {

@@ -31,6 +31,16 @@ runs the validated binary and prints usage. `make update-lock` resolves new
 dependencies while retaining existing locked packages, including the analyzer's
 tree-sitter resolution.
 
+## Immediate evidence
+
+`make wiki-journal GRAPH_ROOT=path` appends `PROMPT_FILE`, `prompt` or stdin to
+the UTC daily published journal. It preserves existing bytes and atomically
+replaces the single journal file under the same graph lock used by other writes.
+It refuses unfinished batch publications and unsafe paths. No draft, review
+queue or separate publication step is involved. Philby web search uses this
+operation before acknowledging success; raw search results are not verified claims.
+Multi-document article changes retain batch staging and recovery receipts.
+
 ## Read-only terminal browser
 
 The shared `wiki-pane` target starts this viewer in a frame-owned tmux pane. The viewer reads the owning frame's `wiki/` graph. A first launch creates an empty `wiki/pages/` if the graph is missing. Existing graphs open in place.

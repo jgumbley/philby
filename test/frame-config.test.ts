@@ -16,24 +16,24 @@ function frame(name:string) {
   const path=join(directory,name);mkdirSync(path);return path;
 }
 
-test('frame settings persist model, explicit thinking and disabled messaging through the standard schema',()=>{
+test('frame settings persist model and explicit thinking through the standard schema',()=>{
   const path=frame('roundtrip');
   assert.equal(readFrameSettings(path),undefined);
-  writeFrameSettings(path,{model,thinkingLevel:'high',messaging:false});
-  assert.deepEqual(readFrameSettings(path),{model,thinkingLevel:'high',messaging:false});
+  writeFrameSettings(path,{model,thinkingLevel:'high'});
+  assert.deepEqual(readFrameSettings(path),{model,thinkingLevel:'high'});
   assert.equal(statSync(join(path,'frame.env')).mode & 0o777,0o600);
-  writeFrameSettings(path,{model,messaging:true});
-  assert.deepEqual(readFrameSettings(path),{model,messaging:true});
+  writeFrameSettings(path,{model});
+  assert.deepEqual(readFrameSettings(path),{model});
   assert.deepEqual(readdirSync(path),['frame.env']);
 });
 
-test('model-only and legacy disabled settings write only the model',()=>{
-  const path=frame('messaging-default');
+test('model-only settings write only the model',()=>{
+  const path=frame('model-default');
   const file=join(path,'frame.env');
-  for(const legacy of ['','FRAME_THINKING_LEVEL=\nFRAME_MESSAGING=false\n']) {
-    writeFileSync(file,`FRAME_MODEL=test/owner/model\n${legacy}`);
+  for(const thinking of ['','FRAME_THINKING_LEVEL=\n']) {
+    writeFileSync(file,`FRAME_MODEL=test/owner/model\n${thinking}`);
     const settings=readFrameSettings(path)!;
-    assert.deepEqual(settings,{model,messaging:false});
+    assert.deepEqual(settings,{model});
     writeFrameSettings(path,settings);
     assert.equal(readFileSync(file,'utf8'),'FRAME_MODEL="test/owner/model"\n');
   }
@@ -46,12 +46,12 @@ test('frame settings round-trip selected sources and memory when the model is up
   writeFileSync(join(directory,'shared','tool.mk'),'');
   writeFileSync(join(path,'Makefile'),'');
   const settings=readFrameSettings(path)!;
-  assert.deepEqual(settings,{model,messaging:false,memory:true,toolSources:['shared/tool.mk','frame/Makefile']});
+  assert.deepEqual(settings,{model,memory:true,toolSources:['shared/tool.mk','frame/Makefile']});
   assert.deepEqual(resolveToolSources(path,settings.toolSources),[join(directory,'shared','tool.mk'),join(path,'Makefile')]);
   const updated={...settings,model:{provider:'other',modelId:'another'}};
   writeFrameSettings(path,updated);
   assert.deepEqual(readFrameSettings(path),updated);
-  assert.doesNotMatch(readFileSync(file,'utf8'),/FRAME_MESSAGING|FRAME_THINKING_LEVEL/);
+  assert.doesNotMatch(readFileSync(file,'utf8'),/FRAME_THINKING_LEVEL/);
   for(const invalid of ['frame/absent.mk','shared','frame/','/etc/Makefile','other/Makefile','frame/../shared/tool.mk']) {
     assert.throws(()=>resolveToolSources(path,[invalid]),/FRAME_TOOL_SOURCES/);
   }
@@ -59,9 +59,9 @@ test('frame settings round-trip selected sources and memory when the model is up
 
 test('invalid updates preserve the previous settings file',()=>{
   const path=frame('invalid-update');
-  writeFrameSettings(path,{model,messaging:false});
+  writeFrameSettings(path,{model});
   const previous=readFileSync(join(path,'frame.env'),'utf8');
-  for(const settings of [{model:{provider:'bad provider',modelId:'model'},messaging:false},{model,thinkingLevel:'invented',messaging:false},{model:{provider:'test',modelId:'invalid"quote'},messaging:false},{model,messaging:'false'},{model,messaging:undefined}]) {
+  for(const settings of [{model:{provider:'bad provider',modelId:'model'}},{model,thinkingLevel:'invented'},{model:{provider:'test',modelId:'invalid"quote'}}]) {
     assert.throws(()=>writeFrameSettings(path,settings as Parameters<typeof writeFrameSettings>[1]));
     assert.equal(readFileSync(join(path,'frame.env'),'utf8'),previous);
     assert.deepEqual(readdirSync(path),['frame.env']);
@@ -70,7 +70,7 @@ test('invalid updates preserve the previous settings file',()=>{
 
 test('present malformed frame settings fail instead of becoming a missing file',()=>{
   const path=frame('invalid-read');
-  for(const source of ['', 'FRAME_MODEL=invalid\n', 'FRAME_MODEL=test/model\nFRAME_THINKING_LEVEL=unknown\n', 'FRAME_MODEL=test/model\nUNRECOGNIZED=secret-marker\n', 'FRAME_MODEL=test/one\nFRAME_MODEL=test/two\n', 'FRAME_MODEL=test/model\ninvalid syntax\n', ...['', '1', '0', 'yes', 'TRUE', 'False'].map(value=>`FRAME_MODEL=test/model\nFRAME_MESSAGING=${value}\n`), 'FRAME_MODEL=test/model\nFRAME_MESSAGING=true\nFRAME_MESSAGING=false\n']) {
+  for(const source of ['', 'FRAME_MODEL=invalid\n', 'FRAME_MODEL=test/model\nFRAME_THINKING_LEVEL=unknown\n', 'FRAME_MODEL=test/model\nUNRECOGNIZED=secret-marker\n', 'FRAME_MODEL=test/one\nFRAME_MODEL=test/two\n', 'FRAME_MODEL=test/model\ninvalid syntax\n', 'FRAME_MODEL=test/model\nFRAME_MESSAGING=true\n']) {
     writeFileSync(join(path,'frame.env'),source);
     assert.throws(()=>readFrameSettings(path),error=>error instanceof Error && !error.message.includes('secret-marker'));
   }
@@ -78,25 +78,24 @@ test('present malformed frame settings fail instead of becoming a missing file',
 
 test('saved frame settings ignore ambient overrides and tool environment files',()=>{
   const path=frame('isolated');
-  const before={model:process.env.FRAME_MODEL,thinking:process.env.FRAME_THINKING_LEVEL,messaging:process.env.FRAME_MESSAGING};
-  process.env.FRAME_MODEL='ambient/other';process.env.FRAME_THINKING_LEVEL='max';process.env.FRAME_MESSAGING='true';
-  const toolSource='FRAME_MODEL=tools/other\nFRAME_MESSAGING=true\nPRIVATE_TOKEN=secret-marker\n';
+  const before={model:process.env.FRAME_MODEL,thinking:process.env.FRAME_THINKING_LEVEL};
+  process.env.FRAME_MODEL='ambient/other';process.env.FRAME_THINKING_LEVEL='max';
+  const toolSource='FRAME_MODEL=tools/other\nPRIVATE_TOKEN=secret-marker\n';
   writeFileSync(join(path,'.env'),toolSource);
   try {
-    writeFrameSettings(path,{model,messaging:false});
-    assert.deepEqual(readFrameSettings(path),{model,messaging:false});
+    writeFrameSettings(path,{model});
+    assert.deepEqual(readFrameSettings(path),{model});
     assert.equal(readFileSync(join(path,'.env'),'utf8'),toolSource);
   } finally {
     if(before.model===undefined)delete process.env.FRAME_MODEL;else process.env.FRAME_MODEL=before.model;
     if(before.thinking===undefined)delete process.env.FRAME_THINKING_LEVEL;else process.env.FRAME_THINKING_LEVEL=before.thinking;
-    if(before.messaging===undefined)delete process.env.FRAME_MESSAGING;else process.env.FRAME_MESSAGING=before.messaging;
   }
 });
 
 test('frame settings are literal dotenv values without resolver or interpolation execution',()=>{
   const path=frame('literal');
   writeFileSync(join(path,'frame.env'),'# @type=number\nFRAME_MODEL="test/${OTHER}"\nFRAME_THINKING_LEVEL=low\n');
-  assert.deepEqual(readFrameSettings(path),{model:{provider:'test',modelId:'${OTHER}'},thinkingLevel:'low',messaging:false});
+  assert.deepEqual(readFrameSettings(path),{model:{provider:'test',modelId:'${OTHER}'},thinkingLevel:'low'});
 });
 
 test.after(()=>rmSync(directory,{recursive:true,force:true}));

@@ -1,27 +1,37 @@
-import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, constants, lstatSync, mkdirSync, openSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { lstatSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type SearchResult = { title: string; url: string; excerpt: string };
 
-export function recordSearch(frameDirectory: string, query: string, results: SearchResult[]): string {
-  if (!query.trim()) throw Error('A search query is required');
-  const words = query.normalize('NFKC').toLowerCase().match(/[\p{Letter}\p{Number}]+/gu) ?? [];
-  const slug = Array.from(words.join('-')).slice(0, 48).join('').replace(/-$/, '') || 'search';
-  const digest = createHash('sha256').update(query.trim()).digest('hex').slice(0, 16);
-  const relative = join('.searches', `${slug}-${digest}.md`);
-  const entries = results.map(({ title, url, excerpt }, index) =>
-    `### ${index + 1}. ${title.replace(/\s+/g, ' ')}\n\n<${url}>\n\n${excerpt}`
+export function searchEntry(query:string,results:SearchResult[]):string {
+  if(!query.trim()) throw Error('A search query is required');
+  const entries=results.map(({title,url,excerpt},index)=>
+    `### ${index+1}. ${title.replace(/\s+/g,' ')}\n\n<${url}>\n\n${excerpt}`
   );
-  const section = [`## ${new Date().toISOString()}`, `Query:\n\n${query}`, ...(entries.length ? entries : ['No results.'])].join('\n\n') + '\n\n';
-  const directory = join(frameDirectory, '.searches');
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  if (!lstatSync(directory).isDirectory()) throw Error('.searches must be a directory in the calling frame');
-  const file = openSync(join(frameDirectory, relative), constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW, 0o600);
-  try {
-    appendFileSync(file, section);
-  } finally {
-    closeSync(file);
-  }
-  return relative;
+  return [`## ${new Date().toISOString()} — Web search`,`Query:\n\n${query}`,
+    'Raw search evidence, not verified findings. Sources may be stale or disagree. Articles informed: none.',
+    ...(entries.length?entries:['No results.'])].join('\n\n')+'\n';
+}
+
+export async function recordSearch(frameDirectory:string,query:string,results:SearchResult[]):Promise<string> {
+  const entry=searchEntry(query,results);
+  const graph=join(frameDirectory,'wiki');
+  mkdirSync(graph,{recursive:true,mode:0o700});
+  if(!lstatSync(graph).isDirectory()) throw Error('wiki must be a directory in the calling frame');
+  const output=await new Promise<string>((resolve,reject)=>{
+    const child=spawn(process.execPath,[fileURLToPath(new URL('../../shared/graphwiki/wiki.mjs',import.meta.url)),'journal'],{
+      env:{...process.env,GRAPH_ROOT:graph,PROMPT:undefined,PROMPT_FILE:undefined},stdio:['pipe','pipe','pipe']
+    });
+    let stdout='',stderr='';
+    child.stdout.setEncoding('utf8').on('data',text=>{stdout+=text;});
+    child.stderr.setEncoding('utf8').on('data',text=>{stderr+=text;});
+    child.once('error',reject);
+    child.stdin.on('error',reject);
+    child.once('close',(code,signal)=>code===0?resolve(stdout.trim()):reject(Error(`Search journal publication failed (${signal ?? code}): ${stderr.trim()}`)));
+    child.stdin.end(entry);
+  });
+  if(!/^journals\/\d{4}-\d\d-\d\d\.md$/.test(output)) throw Error('Journal publication returned an invalid path');
+  return join('wiki',output);
 }

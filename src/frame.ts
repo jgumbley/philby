@@ -10,7 +10,7 @@ import { readFileSync, rmSync, existsSync } from 'node:fs';
 import type { Server } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { envelope, lock, prepare, paths, root, framesRoot, Store, type Envelope } from './store.js';
+import { lock, prepare, paths, root, framesRoot } from './store.js';
 import { listen, type Command } from './ipc.js';
 import { modelChoices, refreshModels, type ModelChoice } from './models.js';
 import type { ModelReference } from './providers.js';
@@ -65,24 +65,34 @@ const Startup = defineTask<{prompt:string}, {phase:'startup'}, null>({
   }},
   abort:async(_task,runtime,context)=>{await runtime.commit(()=>({status:'terminal',outcome:{status:'aborted'}}),context);}
 });
+function frameConfiguration(id:string,models:Models,frameSettings:FrameSettings,environment?:NodeJS.ProcessEnv) {
+  const directory=paths(id).tools;
+  const selected=models.getModel(frameSettings.model.provider,frameSettings.model.modelId);
+  if(!selected) throw Error(`Configured frame model unavailable: ${frameSettings.model.provider}/${frameSettings.model.modelId}`);
+  return {
+    frameSettings,
+    guidance:readFileSync(join(root,'FRAME.md'),'utf8').trim(),
+    scope:readFileSync(join(directory,'SCOPE.md'),'utf8').trim(),
+    sources:resolveToolSources(directory,frameSettings.toolSources),
+    settings:harnessSettings(),
+    thinkingLevel:frameSettings.thinkingLevel ?? modelThinkingLevel(selected) ?? null,
+    shellEnv:environment ?? frameEnvironment(directory,id,framesRoot)
+  };
+}
 export class Frame {
   harness!: Harness;
   conversation!: Conversation;
-  store!: Store;
   env!: NodeExecutionEnv;
   release!: () => void;
   server?: Server;
-  timer?: ReturnType<typeof setInterval>;
   closing = false;
-  ticking?: Promise<void>;
   onClose?: () => void;
   onError: (error: unknown) => void = e => console.error(String(e));
   private closure?: Promise<void>;
   private hasLaunchedPanes = false;
   private boot = false;
-  private messagingEnabled = false;
-  get messaging() {return this.messagingEnabled;}
   private shellEnv!:NodeJS.ProcessEnv;
+  private configuration!:ReturnType<typeof frameConfiguration>;
   private settingsUpdate:Promise<unknown>=Promise.resolve();
   private admissions:Promise<unknown>=Promise.resolve();
   private readonly makefiles: Record<string,string>;
@@ -100,52 +110,38 @@ export class Frame {
       const database=join(dirs.state,'durable.sqlite');
       const saved=readFrameSettings(dirs.tools);
       if(!saved && existsSync(database)) throw Error(`Missing frame.env; run make frame-config-migrate id=${id}`);
-      p.shellEnv=environment ?? frameEnvironment(dirs.tools,id,framesRoot);
-      const frameSettings:FrameSettings=saved ?? {model:typeof model==='function'?model():model,messaging:false};
+      const frameSettings:FrameSettings=saved ?? {model:typeof model==='function'?model():model};
       const selected=frameSettings.model;
       const selectedModel=models.getModel(selected.provider,selected.modelId);
       if(!selectedModel) throw Error(`${saved ? 'Saved model' : 'Model'} unavailable: ${selected.provider}/${selected.modelId}`);
-      const sources=resolveToolSources(dirs.tools,frameSettings.toolSources);
-      p.messagingEnabled=frameSettings.messaging;
-      const guidance=readFileSync(join(root,'FRAME.md'),'utf8').trim();
-      const scope=readFileSync(join(dirs.tools,'SCOPE.md'),'utf8').trim();
-      const settings=harnessSettings();
+      p.configuration=frameConfiguration(id,models,frameSettings,environment);
+      p.shellEnv=p.configuration.shellEnv;
       if(!saved) writeFrameSettings(dirs.tools,frameSettings);
       const boot=existsSync(join(dirs.tools,'BOOT.md')) ? readFileSync(join(dirs.tools,'BOOT.md'),'utf8').trim() : '';
-      p.store = new Store(id);
       p.env = new NodeExecutionEnv({cwd:dirs.tools, shellEnv:p.shellEnv});
       const registry = createRegistry(); registry.install(CodingTools);
       registry.install(defineExtension({name:'philby', tasks:[Startup], hooks:[frameContext], sections:[
-        section('frame-guidance', () => guidance || undefined,{tag:false}),
-        section('frame-scope', () => scope || undefined,{tag:false}),
-        ...(sources.length ? [section('tool-sources', () => `Make sources to read on demand:\n${sources.join('\n')}`)] : []),
-        ...(p.messaging ? [
-          section('messaging', () => `Use make -C "$PHILBY_ROOT" frame-send or frame-report with id=<receiving-frame>, from="${id}", a stable REQUEST_ID, and PROMPT_FILE or stdin. Both frames must enable messaging. Reports do not start a turn.`),
-          section('unread-updates', () => {
-            const unread=p.store.updates().filter(update=>!update.seen).slice(-50);
-            return unread.length ? JSON.stringify(unread) : undefined;
-          })
-        ] : []),
-        ...(frameSettings.memory ? [section('saved-memory', async (input, context) => {
+        section('frame-guidance', () => p.configuration.guidance || undefined,{tag:false}),
+        section('frame-scope', () => p.configuration.scope || undefined,{tag:false}),
+        section('tool-sources', () => p.configuration.sources.length ? `Make sources to read on demand:\n${p.configuration.sources.join('\n')}` : undefined),
+        section('saved-memory', async (input, context) => {
+          if(!p.configuration.frameSettings.memory) return undefined;
           const memory=await input.read.snapshot(Memory,input.conversationId,context);
           const populated=Object.entries(memory ?? {}).filter(([,value])=>value.trim());
           return populated.length ? JSON.stringify(Object.fromEntries(populated)) : undefined;
-        })] : []),
+        }),
         section('plan-mode', async (input, context) => (await input.read.snapshot(PlanMode, input.conversationId, context))?.active ? PLAN_MODE_PROMPT : undefined),
         section('approved-plan', async (input, context) => { const doc = await input.read.snapshot(PlanMode, input.conversationId, context); return doc && !doc.active && doc.plan ? `Approved plan:\n${doc.plan}` : undefined; })
       ], wraps: CodingTools.tools!.filter(tool => tool.name !== 'read').map(planGate)}));
-      p.harness = await Harness.open(await openNodeSqliteStorage(database), {models, registry, settings, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
+      p.harness = await Harness.open(await openNodeSqliteStorage(database), {models, registry, settings: () => p.configuration.settings, env: () => p.env, onReport:e => p.onError(e.error)}, ctx);
       p.conversation = await p.harness.root(ctx, {init:(tx,id)=>configure(tx,id,{model:selected,cwd:dirs.tools})});
-      const thinkingLevel=frameSettings.thinkingLevel ?? modelThinkingLevel(selectedModel);
-      await p.conversation.configure({model:selected,thinkingLevel:thinkingLevel ?? null},ctx);
+      await p.conversation.configure({model:selected,thinkingLevel:p.configuration.thinkingLevel},ctx);
       await p.conversation.commit(async tx => { await tx.doc(Memory,p.conversation.id); await tx.doc(PlanMode,p.conversation.id); },ctx);
       const startup=(await p.harness.inspect(ctx)).tasks.some(t=>t.record.kind==='philby.startup');
       p.boot=!!boot || startup;
-      await p.tick();
       if(boot && !startup) await p.conversation.commit(tx=>tx.createTask(Startup,{prompt:boot},{ownership:{kind:'conversation'},background:true}),ctx);
       p.server = await listen(id, c => p.operation(c));
       p.harness.resume();
-      if(p.messaging) p.timer = setInterval(() => { void p.tick().catch(p.onError); },500);
       return p;
     } catch(e) { await p.close(); throw e; }
   }
@@ -178,9 +174,8 @@ export class Frame {
   }
   async operation(c: Command): Promise<unknown> {
     if (this.closing) throw Error('Frame is closing');
-    if(!this.messaging && ['send','receive','updates'].includes(c.op)) throw Error(`Messaging is disabled for frame ${this.id}`);
     switch(c.op) {
-      case 'status': return {id:this.id,pid:process.pid,messaging:this.messaging, memory:await this.harness.snapshot(Memory,this.conversation.id,ctx), updates:this.messaging ? this.store.updates() : [], work:await this.harness.inspect(ctx)};
+      case 'status': return {id:this.id,pid:process.pid,memory:await this.harness.snapshot(Memory,this.conversation.id,ctx),work:await this.harness.inspect(ctx)};
       case 'pane-start': {
         if(typeof c.name!=='string' || typeof c.target!=='string') throw Error('Supply PANE=<name> and TARGET=<make-target>');
         if(c.source!=='frame' && c.source!=='shared') throw Error('Pane targets must come from the frame or shared Makefile');
@@ -220,13 +215,6 @@ export class Frame {
           return {accepted:sub.id};
         });
       }
-      case 'receive': this.store.accept(c.envelope as Envelope); return {persisted:true};
-      case 'send': {
-        const e = envelope(this.id,String(c.to),String(c.content ?? ''),{...(c.id ? {id:String(c.id)} : {}),kind:c.kind === 'update' ? 'update' : 'input',mode:c.mode === 'steer' ? 'steer' : 'followUp'});
-        const receiving = new Store(e.to);
-        try { receiving.accept(e); return {accepted:e.id}; }
-        finally { receiving.close(); }
-      }
       case 'stop': {
         const data = await this.harness.snapshot(LiveDoc,this.conversation.id,ctx);
         if (data?.run?.taskId) {
@@ -263,47 +251,44 @@ export class Frame {
         },ctx);
         return saved;
       }
-      case 'new': return this.admit(async()=>{
-        for(const message of this.store.pending()) if(message.kind==='input') this.store.placed(message);
-        await this.conversation.abort(ctx,{background:true});
-        await this.conversation.commit(async tx => {
-          const inbox = await tx.doc(InboxDoc, this.conversation.id);
-          for(const item of inbox.items) tx.settleSubmission(item.id,{status:'unanswered',reason:'aborted'});
-          inbox.items=[];
-          const plan = await tx.doc(PlanMode, this.conversation.id);
-          plan.active = false;
-          plan.plan = '';
-          await tx.appendEntry(ResetEntry, this.conversation.id, {head:'self'});
-        },ctx);
-        return {reset:true};
+      case 'new': return this.admit(()=>{
+        const update=this.settingsUpdate.then(async()=>{
+          if(this.closing) throw Error('Frame is closing');
+          const saved=readFrameSettings(paths(this.id).tools);
+          if(!saved) throw Error('Missing frame.env');
+          const configuration=frameConfiguration(this.id,this.models,saved);
+          await this.conversation.abort(ctx,{background:true});
+          await this.env.cleanup(ctx);
+          await this.conversation.commit(async tx => {
+            const inbox = await tx.doc(InboxDoc, this.conversation.id);
+            for(const item of inbox.items) tx.settleSubmission(item.id,{status:'unanswered',reason:'aborted'});
+            inbox.items=[];
+            const plan = await tx.doc(PlanMode, this.conversation.id);
+            plan.active = false;
+            plan.plan = '';
+            configure(tx,this.conversation.id,{model:saved.model,thinkingLevel:configuration.thinkingLevel});
+            await tx.appendEntry(ResetEntry, this.conversation.id, {head:'self'});
+          },ctx);
+          this.configuration=configuration;
+          this.shellEnv=configuration.shellEnv;
+          this.env=new NodeExecutionEnv({cwd:paths(this.id).tools,shellEnv:this.shellEnv});
+          return {reset:true};
+        });
+        this.settingsUpdate=update.catch(()=>{});
+        return update;
       });
-      case 'updates': return this.store.updates(!!c.mark);
       case 'tools': return this.tools();
       case 'capture': return capture(this.conversation,c.all===true);
       default: throw Error(`Unknown operation: ${c.op}`);
-    }
-  }
-  tick() {
-    if (this.closing || !this.messaging) return Promise.resolve();
-    if(this.ticking) return this.ticking;
-    this.ticking = this.admit(()=>this.pump()).finally(() => {this.ticking=undefined;});
-    return this.ticking;
-  }
-  private async pump() {
-    for (const e of this.store.pending()) {
-      if(this.closing) return;
-      if(e.kind==='input') await this.conversation.submit({type:'input',content:`[From ${e.from}]\n${e.content}`,requestId:`message:${e.id}`,whenBusy:e.mode},ctx);
-      this.store.placed(e);
     }
   }
   close() {
     if(this.closure) return this.closure;
     this.closing=true;
     this.closure=(async()=>{
-      clearInterval(this.timer);
       this.server?.close();
       try {
-        await this.admissions; await this.ticking;
+        await this.admissions;
         if(this.hasLaunchedPanes) closeFramePanes(this.id);
       }
       finally {
@@ -315,7 +300,6 @@ export class Frame {
           finally {
             try { await this.env?.cleanup(ctx); }
             finally {
-              this.store?.close();
               rmSync(paths(this.id).socket,{force:true});
               this.release();this.onClose?.();
             }
@@ -341,7 +325,7 @@ export async function migrateFrameSettings(id:string) {
       if(!conversation) throw Error(`Frame ${id} has no saved conversation`);
       const saved=await harness.snapshot(AgentDoc,conversation.id,ctx);
       if(!saved?.model) throw Error(`Frame ${id} has no saved model`);
-      writeFrameSettings(directory,{model:saved.model,messaging:false,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
+      writeFrameSettings(directory,{model:saved.model,...(saved.thinkingLevel===undefined?{}:{thinkingLevel:saved.thinkingLevel})});
       return {id,migrated:true};
     } finally {await harness.close(ctx);}
   } finally {release();}

@@ -38,17 +38,20 @@ test('shared search uses the calling frame, preserves literal prompt inputs and 
     return spawnSync('make',['-C',shared,'search','id=other',...args],{
       cwd:caller,input,encoding:'utf8',
       env:{PATH:process.env.PATH,PHILBY_ROOT:root,PHILBY_FRAMES_DIR:frames,PHILBY_FRAME:'inkling',
-        NODE_OPTIONS:`--import=${preload}`,PI_OFFLINE:'1',EXPECTED_QUERY:query,FAIL_SEARCH:fail?'1':''}
+        NODE_OPTIONS:`--import=${preload}`,PI_OFFLINE:'1',EXPECTED_QUERY:query,FAIL_SEARCH:fail?'1':'',
+        RUSTUP_HOME:process.env.RUSTUP_HOME,CARGO_HOME:process.env.CARGO_HOME}
     });
   }
   const first=search([`prompt=${query}`]);
   assert.equal(first.status,0,first.stderr);
-  assert.match(first.stdout,/^\.searches\/[\w-]+\.md\n$/);
+  assert.match(first.stdout,/^wiki\/journals\/\d{4}-\d\d-\d\d\.md\n$/);
   const path=join(caller,first.stdout.trim());
   const record=readFileSync(path,'utf8');
   for(const text of [query,'Replay rules','https://docs.example/replay','Recorded evidence']) assert.ok(record.includes(text));
   assert.ok(!record.includes('Generated prose'));
-  assert.ok(!existsSync(join(other,'.searches')));
+  assert.ok(!existsSync(join(other,'wiki')));
+  assert.ok(!existsSync(join(caller,'.searches')));
+  assert.ok(!existsSync(join(caller,'wiki','.drafts')));
   const promptFile=join(caller,'query.txt');
   writeFileSync(promptFile,query);
   for(const result of [search([`PROMPT_FILE=${promptFile}`,'prompt=unused'],'unused'),search([],query)]) {

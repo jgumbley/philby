@@ -16,7 +16,7 @@ export PROMPT PROMPT_FILE
 override export GRAPH_ROOT := $(value GRAPH_ROOT)
 override export CHANGE := $(value CHANGE)
 
-.PHONY: help wiki-context wiki-publish wiki-index wiki-lint run build compile invoke release test check fmt fmt-check clippy doc lint clean ci coverage complexity
+.PHONY: help wiki-context wiki-publish wiki-index wiki-lint wiki-journal run build compile invoke release test check fmt fmt-check clippy doc lint clean ci coverage complexity
 
 help:
 	@echo 'wiki-context GRAPH_ROOT=path — search with PROMPT_FILE, prompt, or stdin'
@@ -24,7 +24,7 @@ help:
 	@echo 'wiki-browse GRAPH_ROOT=path — read-only terminal browser with clickable links'
 	@echo 'check — compile checks; test — formatting, Clippy and tests; ci — test and build'
 
-wiki-context wiki-publish wiki-index wiki-lint:
+wiki-context wiki-publish wiki-index wiki-lint wiki-journal:
 	@node "$(MODULE)/wiki.mjs" $(@:wiki-%=%)
 
 .PHONY: wiki-browse wiki-pane-view update-lock

@@ -29,7 +29,7 @@ function invocation(env:NodeJS.ProcessEnv) {
 export const invocationEnvironment=invocation(process.env);
 export const root=resolve(invocationEnvironment.PHILBY_ROOT || fileURLToPath(new URL('../../',import.meta.url)));
 export const piAgentDir=join(root,'.pi','agent');
-export const frameSettingKeys=['FRAME_MODEL','FRAME_THINKING_LEVEL','FRAME_MESSAGING','FRAME_MEMORY','FRAME_TOOL_SOURCES'];
+export const frameSettingKeys=['FRAME_MODEL','FRAME_THINKING_LEVEL','FRAME_MEMORY','FRAME_TOOL_SOURCES'];
 const instance=loadConfiguration([root],invocationEnvironment);
 
 function environment(values:NodeJS.ProcessEnv) {

@@ -13,7 +13,7 @@ test('migration renames complete directories without replacing private state or 
   mkdirSync(state,{recursive:true});
   writeFileSync(join(tools,'.pane-type'),'graphwiki\n');
   writeFileSync(join(tools,'SCOPE.md'),'Edited pane scope');
-  writeFileSync(join(tools,'Makefile'),'send:\n\tmake -C "$PHILBY_ROOT" pane-send from="$PHILBY_PANE"\n');
+  writeFileSync(join(tools,'Makefile'),'inspect:\n\tmake -C "$PHILBY_ROOT" pane-capture id="$PHILBY_PANE"\n');
   writeFileSync(join(tools,'inspect.mjs'),"const panel = 'capture-pane #{pane_id} TMUX_PANE PHILBY_PANES_DIR';\n",{mode:0o700});
   writeFileSync(join(tools,'artifact.bin'),Buffer.from([0,255,128,1]));
   const database=join(state,'durable.sqlite');
@@ -33,7 +33,7 @@ test('migration renames complete directories without replacing private state or 
   assert.equal(readFileSync(join(moved,'.frame-type'),'utf8'),'graphwiki\n');
   assert.equal(existsSync(join(moved,'.pane-type')),false);
   assert.equal(readFileSync(join(moved,'SCOPE.md'),'utf8'),'Edited frame scope');
-  assert.match(readFileSync(join(moved,'Makefile'),'utf8'),/frame-send from="\$PHILBY_FRAME"/);
+  assert.match(readFileSync(join(moved,'Makefile'),'utf8'),/frame-capture id="\$PHILBY_FRAME"/);
   assert.equal(readFileSync(join(moved,'inspect.mjs'),'utf8'),"const panel = 'capture-pane #{pane_id} TMUX_PANE PHILBY_FRAMES_DIR';\n");
   assert.equal(statSync(join(moved,'inspect.mjs')).mode & 0o777,0o700);
   assert.deepEqual(readFileSync(join(moved,'artifact-link')),Buffer.from([0,255,128,1]));

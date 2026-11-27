@@ -20,7 +20,7 @@ Frames build their own tools in their Makefile and can use the shared targets. T
 
 ## Keeping your work
 
-Each frame’s directory under `frames/` holds its working files and private `.state/`, including the saved conversation and mailbox. Close the frame before copying its directory for backup. Keep credentials and frame state out of source control.
+Each frame’s directory under `frames/` holds its working files and private `.state/`, including the saved conversation. Close the frame before copying its directory for backup. Keep credentials and frame state out of source control.
 
 If an older saved frame is missing `frame.env`, use the `frame-config-migrate` target while it is closed to recover its model settings. [Project Makefile](Makefile)
 

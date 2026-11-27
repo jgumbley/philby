@@ -14,11 +14,9 @@ function run(program:string,args:string[],input?:string,environment:NodeJS.Proce
 }
 const make=(...args:string[])=>run('make',['--no-print-directory',...args]);
 const tmux=(...args:string[])=>run('tmux',['-L',socket,...args]);
-function enableMessaging(name:string) {
-  const tools=join(env.PHILBY_FRAMES_DIR,name);
-  mkdirSync(tools,{recursive:true});
-  writeFileSync(join(tools,'frame.env'),'FRAME_MODEL=test/test\nFRAME_MESSAGING=true\n');
-  return tools;
+function input(id:string,content:string,requestId:string) {
+  const module=new URL('../../src/ipc.js',import.meta.url).href;
+  return run('node',['--input-type=module','-e',`const {request}=await import(${JSON.stringify(module)}); console.log(JSON.stringify(await request(${JSON.stringify(id)},${JSON.stringify({op:'input',content,id:requestId})})));`]);
 }
 function terminalCommand(command:string[]):[string,string[]] {
   if(process.platform==='darwin') return ['/bin/sh',['-c','cat | exec script -qF /dev/null "$@"','philby-test',...command]];
@@ -108,16 +106,16 @@ test('bare Make starts one selector without creating a frame and creates the fir
     assert.equal((await tmux('list-windows','-t','philby','-F','#{window_name}')).trim(),'alpha');
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
-test('frame selection, tmux inventory, terminal input, multiline sends, independent close, crash and confirmed quit',async()=>{
+test('frame selection, tmux inventory, terminal input, multiline input, independent close, crash and confirmed quit',async()=>{
   let terminal:ReturnType<typeof spawn>|undefined;
   try {
-    enableMessaging('alpha');
     await make('frame','id=alpha');
     assert.match(await make('frame-list'),/alpha\s+running/);
     await Promise.all([make('frame','id=alpha'),make('frame','id=alpha')]);
     assert.equal((await tmux('list-windows','-t','philby','-F','#{window_name}')).trim(),'alpha');
     assert.equal((await tmux('display-message','-p','-t','philby:alpha','#{pane_title}')).trim(),'alpha');
-    const workerTools=enableMessaging('worker');
+    const workerTools=join(env.PHILBY_FRAMES_DIR,'worker');
+    mkdirSync(workerTools,{recursive:true});
     copyFileSync(join(root,'frame-types','plain','.env.schema'),join(workerTools,'.env.schema'));
     writeFileSync(join(workerTools,'BOOT.md'),'Verify the configured workspace.');
     writeFileSync(join(workerTools,'Makefile'),'close:\n\t@echo closed >> closed\n');
@@ -192,10 +190,9 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
     await tmux('send-keys','-t','philby:alpha','hello terminal','Enter');
     await until(async()=> (await make('frame-capture','id=alpha')).includes('Received: hello terminal'));
     const prompt="line one\nline two 'quoted' $HOME `literal`\n";
-    const file=join(directory,'prompt');writeFileSync(file,prompt);
-    await make('frame-send','id=alpha','from=alpha',`PROMPT_FILE=${file}`,'REQUEST_ID=multiline');
+    await input('alpha',prompt,'multiline');
     await until(async()=> (await make('frame-capture','id=alpha')).includes('line two'));
-    await make('frame-send','id=alpha','from=alpha',`PROMPT_FILE=${file}`,'REQUEST_ID=multiline');
+    await input('alpha',prompt,'multiline');
     const entries=JSON.parse(await make('frame-capture','id=alpha'));
     assert.equal(entries.filter((e:any)=>e.kind==='pi.user' && JSON.stringify(e).includes('line two')).length,1);
     await Promise.all([make('frame','id=worker'),make('frame','id=worker')]);
@@ -204,25 +201,23 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
     await make('frame-close','id=alpha');
     await until(async()=> (await make('frame-list')).includes('alpha\tsaved'));
     assert.match(await make('frame-list'),/worker\s+running/);
-    await run('make',['--no-print-directory','frame-send','id=alpha','from=worker','REQUEST_ID=closed'],'while closed\nsecond line');
     await make('frame-new');
     const reopening=await selectorByName();
     assert.match(await tmux('capture-pane','-p','-t',reopening),/alpha[\s\S]*Closed — resume conversation[\s\S]*worker[\s\S]*Open — switch to frame/);
     await tmux('send-keys','-t',reopening,'Down','Enter');
     await until(async()=> (await make('frame-list')).includes('alpha\trunning'));
-    await until(async()=> (await make('frame-capture','id=alpha')).includes('while closed'));
     assert.match(await make('frame-capture','id=alpha'),/Received: hello terminal/);
     assert.deepEqual(JSON.parse(await make('frame-memory','id=alpha')),savedMemory);
-    await make('frame-send','from=alpha','id=worker','REQUEST_ID=crash-dedupe','prompt=one delivery');
+    await input('worker','one delivery','crash-dedupe');
     await until(async()=> (await make('frame-capture','id=worker')).includes('one delivery'));
     const status=JSON.parse(await run('node',['dist/src/cli.js','status','worker']));
     process.kill(status.pid,'SIGKILL');
     await new Promise(r=>setTimeout(r,300));
     await make('frame','id=worker');
-    await make('frame-send','from=alpha','id=worker','REQUEST_ID=crash-dedupe','prompt=one delivery');
+    await input('worker','one delivery','crash-dedupe');
     const recovered=JSON.parse(await make('frame-capture','id=worker'));
     assert.equal(recovered.filter((e:any)=>e.kind==='pi.user' && JSON.stringify(e).includes('one delivery')).length,1);
-    await until(async()=> (await make('frame-capture','id=worker')).includes('Received: [From alpha]'));
+    await until(async()=> (await make('frame-capture','id=worker')).includes('Received: one delivery'));
     await until(async()=> JSON.parse(await run('node',['dist/src/cli.js','status','worker'])).work.tasks.length===0);
     await make('frame-memory','id=worker','FIELD=notes','prompt=Remember after quitting');
     await tmux('send-keys','-t','philby:worker','/memory notes','Enter');
@@ -269,14 +264,11 @@ test('frame selection, tmux inventory, terminal input, multiline sends, independ
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);terminal?.stdin?.end();terminal?.kill();rmSync(directory,{recursive:true,force:true});}
 });
 
-test('typed creation preserves queued work and retired recipes can reopen their saved frames',async()=>{
+test('typed creation and retired recipes can reopen their saved frames',async()=>{
   try {
     await assert.rejects(make('frame','id=retired','TYPE=graphwiki'),/Unknown frame type/);
-    enableMessaging('alpha');
-    enableMessaging('knowledge');
     await make('frame','id=alpha','TYPE=plain');
     for(const key of ['TYPE','MAKEFLAGS','MAKEOVERRIDES','MFLAGS','MAKELEVEL']) await assert.rejects(tmux('show-environment','-g',key),/unknown variable/);
-    await make('frame-send','from=alpha','id=knowledge','REQUEST_ID=before-type','prompt=Queued before choosing a type');
     await assert.rejects(make('frame-capture','id=knowledge'),/No saved conversation/);
     assert.doesNotMatch(await make('frame-list'),/^knowledge\t/m);
     await make('frame-new');
@@ -290,7 +282,8 @@ test('typed creation preserves queued work and retired recipes can reopen their 
     await until(async()=> (await make('frame-list')).includes('knowledge\trunning'));
     const tools=join(directory,'frames','knowledge');
     assert.equal(readFileSync(join(tools,'.frame-type'),'utf8'),'plain\n');
-    await until(async()=> (await make('frame-capture','id=knowledge')).includes('Received: [From alpha]'));
+    await tmux('send-keys','-t','philby:knowledge','typed frame input','Enter');
+    await until(async()=> (await make('frame-capture','id=knowledge')).includes('Received: typed frame input'));
     const before=JSON.parse(await make('frame-capture','id=knowledge'));
     writeFileSync(join(tools,'SCOPE.md'),'Edited by the user');
     await make('frame-close','id=knowledge');
@@ -382,6 +375,9 @@ test('frame panes keep operator focus, isolate duplicate names, and retain termi
     assert.deepEqual(await windowNames(),['research','monitor','review','monitor']);
     assert.match(log(quick.log),/IMMEDIATE/);
     const reader=Number(readFileSync(join(env.PHILBY_FRAMES_DIR,'research','reader.pid'),'utf8'));
+    const panesBeforeReset=JSON.parse(await paneCommand('list','research'));
+    await make('frame-new-session','id=research');
+    assert.deepEqual(JSON.parse(await paneCommand('list','research')),panesBeforeReset);
     process.kill(reader,0);
     await make('frame-close','id=research');
     await until(async()=>(await windowNames()).join(',')==='review,monitor');
@@ -556,18 +552,10 @@ test('native model shortlist toggles all models, cancels locally and preserves s
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
 
-test('disabled messaging hides terminal commands and unread reports while ordinary input remains available',async()=>{
+test('removed messaging commands are absent and rejected while ordinary input remains available',async()=>{
   const screen=()=>tmux('capture-pane','-p','-t','philby:quiet');
   const command=(text:string)=>tmux('send-keys','-t','philby:quiet','C-u',text,'Enter');
   try {
-    enableMessaging('quiet');
-    await make('frame','id=quiet');
-    await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
-    assert.match(await screen(),/\/updates/);
-    await make('frame-report','id=quiet','from=quiet','REQUEST_ID=retained-report','prompt=Retain this report');
-    await until(async()=> (await screen()).includes('1 unread updates'));
-    await make('frame-close','id=quiet');
-    await make('frame-messaging','id=quiet','ENABLED=false');
     await make('frame','id=quiet');
     await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
     assert.doesNotMatch(await screen(),/unread updates|\/updates/);
@@ -576,13 +564,14 @@ test('disabled messaging hides terminal commands and unread reports while ordina
       await until(async()=> (await screen()).includes('inspect or edit saved memory'));
       assert.doesNotMatch(await screen(),/\/updates|\/send|\/report/);
       await command(text);
-      await until(async()=> (await screen()).includes('Messaging is disabled for frame quiet'));
+      await until(async()=> (await screen()).includes(`Unknown command: ${text.split(' ')[0]}`));
     }
     await command('ordinary input still works');
     await until(async()=> (await make('frame-capture','id=quiet')).includes('Received: ordinary input still works'));
     assert.doesNotMatch(await make('frame-capture','id=quiet'),/blocked input|blocked report/);
     await until(async()=> /^quiet\s+test\s+ready/m.test(await screen()));
     assert.doesNotMatch(await screen(),/unread updates|\/updates/);
+    assert.equal(existsSync(join(env.PHILBY_FRAMES_DIR,'quiet','.state','app.sqlite')),false);
   } finally {await make('cleanup').catch(()=>{});spawnSync('tmux',['-L',socket,'kill-server']);rmSync(directory,{recursive:true,force:true});}
 });
 

@@ -15,7 +15,7 @@ mkdirSync(recipe,{recursive:true});
 writeFileSync(join(recipe,'SCOPE.md'),'Fixture responsibility');
 writeFileSync(join(recipe,'Makefile'),'help:\n\t@echo fixture\n');
 mkdirSync(join(recipe,'artifacts'));
-const {Store,envelope,paths,prepare,frameTypes,configured}=await import('../src/store.js');
+const {paths,prepare,frameTypes,configured}=await import('../src/store.js');
 
 test('unknown recipes do not create a frame',()=>{
   assert.deepEqual(frameTypes(),['plain','fixture']);
@@ -24,37 +24,22 @@ test('unknown recipes do not create a frame',()=>{
   assert.equal(existsSync(paths('invalid').tools),false);
 });
 
-test('an opted-in queued mailbox does not choose the receiving frame type',()=>{
-  for(const id of ['source','waiting']) {
-    const {tools}=paths(id);
-    mkdirSync(tools,{recursive:true});
-    writeFileSync(join(tools,'frame.env'),'FRAME_MODEL=test/model\nFRAME_MESSAGING=true\n');
-  }
-  const mailbox=new Store('waiting');
-  const message=envelope('source','waiting','retained material',{id:'before-creation'});
-  try {
-    mailbox.accept(message);
-    const waiting=paths('waiting');
-    assert.equal(waiting.state,join(waiting.tools,'.state'));
-    assert.ok(existsSync(join(waiting.state,'app.sqlite')));
-    for(const file of ['SCOPE.md','Makefile','.frame-type'])assert.equal(existsSync(join(waiting.tools,file)),false);
-    assert.equal(configured('waiting'),false);
-    const p=prepare('waiting','fixture');
-    assert.equal(configured('waiting'),true);
-    assert.equal(readFileSync(join(p.tools,'.frame-type'),'utf8'),'fixture\n');
-    assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Fixture responsibility');
-    assert.ok(existsSync(join(p.tools,'artifacts')));
-    assert.deepEqual(mailbox.pending(),[message]);
-    assert.equal(existsSync(join(p.state,'durable.sqlite')),false);
-    writeFileSync(join(p.tools,'SCOPE.md'),'Edited responsibility');
-    writeFileSync(join(p.tools,'Makefile'),'help:\n\t@echo edited\n');
-    prepare('waiting','fixture');
-    prepare('waiting');
-    assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Edited responsibility');
-    assert.equal(readFileSync(join(p.tools,'Makefile'),'utf8'),'help:\n\t@echo edited\n');
-    assert.throws(()=>prepare('waiting','plain'),/already exists with type fixture/);
-    assert.deepEqual(mailbox.pending(),[message]);
-  } finally {mailbox.close();}
+test('creation applies the selected recipe once and preserves edited tools on reopen',()=>{
+  assert.equal(configured('waiting'),false);
+  const p=prepare('waiting','fixture');
+  assert.equal(configured('waiting'),true);
+  assert.equal(p.state,join(p.tools,'.state'));
+  assert.equal(readFileSync(join(p.tools,'.frame-type'),'utf8'),'fixture\n');
+  assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Fixture responsibility');
+  assert.ok(existsSync(join(p.tools,'artifacts')));
+  assert.equal(existsSync(join(p.state,'durable.sqlite')),false);
+  writeFileSync(join(p.tools,'SCOPE.md'),'Edited responsibility');
+  writeFileSync(join(p.tools,'Makefile'),'help:\n\t@echo edited\n');
+  prepare('waiting','fixture');
+  prepare('waiting');
+  assert.equal(readFileSync(join(p.tools,'SCOPE.md'),'utf8'),'Edited responsibility');
+  assert.equal(readFileSync(join(p.tools,'Makefile'),'utf8'),'help:\n\t@echo edited\n');
+  assert.throws(()=>prepare('waiting','plain'),/already exists with type fixture/);
 });
 
 test('failed scaffolding leaves no partial frame tools and can be retried',()=>{

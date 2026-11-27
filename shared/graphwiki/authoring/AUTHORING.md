@@ -36,6 +36,20 @@ Do not turn disputed or tentative claims into settled facts while removing
 attribution. Preserve attribution for distinctive quotations in the journal
 and express the concept in your own words in the article.
 
+Searches publish immediately. `make -C "$PHILBY_ROOT/shared" search` appends the
+literal query, ranked source URLs and raw excerpts to the published UTC daily
+journal before returning its path. Results are evidence, not verified findings;
+record interpretations or corrections as additional entries. Do not copy search
+results to another file, wait for a reviewer, or create an article for every query.
+For other evidence, use the shared `wiki-journal` target with `GRAPH_ROOT=wiki`
+and `PROMPT_FILE`, `prompt` or stdin; it appends atomically under the graph lock.
+
+For changes spanning complete articles and journals, use batch publication.
+`.drafts` is transaction staging for validation, retry and crash recovery, not a
+review queue. The writing agent checks its own article changes and publishes in
+the same turn. There is no separate reviewer or approval step unless the user
+explicitly requests one. Never report a staged file as published.
+
 Prepare complete replacement pages under `wiki/.drafts/<change>/pages/`, with a
 nonempty `wiki/.drafts/<change>/summary.txt`. Stage complete daily journals in
 `wiki/.drafts/<change>/journals/YYYY-MM-DD.md`, preserving existing entries.
@@ -124,7 +138,7 @@ Keep every source reference and attribution in the journal, including metadata.
 Label proposed interpretations clearly. Revisit existing concepts when
 new material challenges them.
 
-### Publish through the existing workflow
+### Publish article batches without a review queue
 
 From the owning frame, follow its Makefile and single-writer rules.
 Stage complete replacements under `wiki/.drafts/<change>/pages/` and
@@ -139,7 +153,7 @@ make lint
 make context PROMPT_FILE=<query-file>
 ```
 
-Before publication, manually read every changed article, including its title
+Before publication, the writing agent reads every changed article, including its title
 and description. Check that it explains a useful concept rather than recounting
 a document, dialogue or research process; that its sourcing is in the journal;
 and that uncertainty and meaningful disagreements survive the rewrite.

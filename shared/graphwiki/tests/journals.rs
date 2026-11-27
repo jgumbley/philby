@@ -22,6 +22,53 @@ fn draft(root: &Path, change: &str, documents: &[(&str, &str)]) {
 }
 
 #[test]
+fn immediate_journal_appends_without_drafts_or_overwriting_existing_entries() {
+    let root = graph();
+    let path = execute("journal", root.path(), JOURNAL).unwrap();
+    let path = root.path().join(path.trim());
+    let original = fs::read_to_string(&path).unwrap();
+    execute("journal", root.path(), "- Further evidence.").unwrap();
+    let updated = fs::read_to_string(&path).unwrap();
+    assert!(updated.starts_with(&original));
+    assert!(updated.ends_with("- Further evidence.\n"));
+    assert!(!root.path().join(".drafts").exists());
+    assert!(execute("context", root.path(), "Bloomberg")
+        .unwrap()
+        .contains(JOURNAL));
+    assert!(execute("journal", root.path(), " ")
+        .unwrap_err()
+        .contains("nonempty"));
+    assert_eq!(fs::read_to_string(path).unwrap(), updated);
+}
+
+#[test]
+fn immediate_journal_refuses_unfinished_batch_publication() {
+    let root = graph();
+    fs::create_dir(root.path().join(".graphwiki")).unwrap();
+    fs::write(
+        root.path().join(".graphwiki/pending"),
+        "unfinished\nfingerprint\ntimestamp\n",
+    )
+    .unwrap();
+    assert!(execute("journal", root.path(), JOURNAL)
+        .unwrap_err()
+        .contains("Unfinished publication"));
+    assert!(!root.path().join("journals").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn immediate_journal_rejects_symlinked_destination() {
+    let root = graph();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("journals")).unwrap();
+    assert!(execute("journal", root.path(), JOURNAL)
+        .unwrap_err()
+        .contains("Symlinks"));
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn journal_only_batch_preserves_blocks_and_stays_out_of_catalogue() {
     let root = graph();
     draft(

@@ -20,19 +20,12 @@ mkdirSync(join(directory,'shared'));writeFileSync(join(directory,'shared','Makef
 cpSync(new URL('../../shared/frame.env.schema',import.meta.url),join(directory,'shared','frame.env.schema'));
 const {Frame,Memory,ctx,migrateFrameSettings}=await import('../src/frame.js');
 const {readFrameSettings,writeFrameSettings}=await import('../src/frame-config.js');
-const {envelope,Store,paths,prepare}=await import('../src/store.js');
+const {paths,prepare}=await import('../src/store.js');
 const {request}=await import('../src/ipc.js');
 const model={provider:'test',modelId:'test'};
 function fixture(responses: Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0]=[fauxAssistantMessage('done')], speed=10000) {
   const faux=fauxProvider({provider:'test',models:[{id:'test'}],tokensPerSecond:speed});
   faux.setResponses(responses);const models=createModels();models.setProvider(faux.provider);return {models,faux};
-}
-function enableMessaging(...ids:string[]) {
-  for(const id of ids) {
-    const {tools}=paths(id);
-    mkdirSync(tools,{recursive:true});
-    writeFrameSettings(tools,{model,messaging:true});
-  }
 }
 async function until(fn:()=>Promise<boolean>|boolean) {for(let i=0;i<200;i++){if(await fn())return;await new Promise(r=>setTimeout(r,25));}throw Error('Timed out');}
 function runCli(command:string,environment:NodeJS.ProcessEnv) {
@@ -137,7 +130,7 @@ test('closed frame settings migration needs no provider and preserves the saved 
   await assert.rejects(Frame.open(p.id,f.models,()=>{throw Error('migration must use the saved selection');}),/frame-config-migrate/);
   assert.equal(existsSync(join(tools,'frame.env')),false);
   assert.deepEqual(await migrateFrameSettings(p.id),{id:p.id,migrated:true});
-  assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
+  assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
   const source=readFileSync(join(tools,'frame.env'),'utf8');
   assert.deepEqual(await migrateFrameSettings(p.id),{id:p.id,migrated:false});
   assert.equal(readFileSync(join(tools,'frame.env'),'utf8'),source);
@@ -201,7 +194,7 @@ test('a synchronization failure after publishing settings closes the frame and r
   try {
     await assert.rejects(p.operation({op:'thinking',level:'high'}),/saved but synchronization failed/);
     assert.equal(p.closing,true);
-    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
   } finally {
     sync.mock.restore();syncBuiltinESMExports();
     await p.close();
@@ -220,7 +213,7 @@ test('saved settings reconcile after a failed runtime projection',async t=>{
   try {
     await assert.rejects(p.operation({op:'thinking',level:'high'}),/injected projection failure/);
     assert.equal(p.closing,true);
-    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
+    assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high'});
   } finally {configure.mock.restore();await p.close();}
   const reopened=await Frame.open(p.id,f.models,model);
   try {
@@ -239,7 +232,7 @@ test('concurrent frame setting updates serialize without losing model or thinkin
       p.operation({op:'thinking',level:'high'}),
       p.operation({op:'model',...model}),
     ]);
-    assert.deepEqual(readFrameSettings(paths(p.id).tools),{model,thinkingLevel:'high',messaging:false});
+    assert.deepEqual(readFrameSettings(paths(p.id).tools),{model,thinkingLevel:'high'});
     assert.deepEqual((await p.conversation.agent(ctx)).model,model);
     assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
     assert.equal(provider.state.callCount,0);
@@ -429,6 +422,10 @@ test('model-only frames send just the working convention and four native tools w
     assert.equal(readFileSync(join(tools,'result'),'utf8'),'verified\n');
     assert.deepEqual(requests,Array(3).fill({system:guidance,tools:['bash','edit','read','write']}));
     assert.doesNotMatch(guidance,/messaging|memory|browser|slides/i);
+    assert.match(guidance,/Before claiming a capability is unavailable/);
+    assert.match(guidance,/pane-list target with id="\$PHILBY_FRAME"/);
+    assert.match(guidance,/read logs on demand/);
+    assert.doesNotMatch(guidance,/pinny|%28|out\.log/);
     assert.deepEqual(await p.operation({op:'tools'}),{shared:readFileSync(join(directory,'shared','Makefile'),'utf8'),frame:makefile});
   }finally{await p.close();}
 });
@@ -436,7 +433,7 @@ test('reopening with selected sources and memory adds only their current referen
   const name='selected-context',tools=prepare(name).tools;
   const file=join(tools,'authoring.mk');
   writeFileSync(file,'secret-target-body:\n\t@true\n');
-  writeFrameSettings(tools,{model,messaging:false,memory:true,toolSources:['frame/authoring.mk']});
+  writeFrameSettings(tools,{model,memory:true,toolSources:['frame/authoring.mk']});
   const systems:string[]=[];
   const capture=async(context:TranscriptContext)=>{
     systems.push((await providerRequest(context)).system);
@@ -453,7 +450,7 @@ test('reopening with selected sources and memory adds only their current referen
     await p.operation({op:'memory',field:'notes',content:'populated memory'});
     await submit();
     await p.close();
-    writeFrameSettings(tools,{model,messaging:false,toolSources:['shared/Makefile']});
+    writeFrameSettings(tools,{model,toolSources:['shared/Makefile']});
     p=await Frame.open(name,f.models,model);
     await submit();
     assert.equal(systems.length,3);
@@ -507,7 +504,7 @@ test('blank boot remains idle and unreadable instructions fail without retaining
   await assert.rejects(Frame.open('instructions-invalid',fixture().models,model),/EISDIR/);
   rmSync(file,{recursive:true});writeFileSync(file,'');writeFileSync(join(dirs.tools,'BOOT.md'),' \n\t');
   const f=fixture();const p=await Frame.open('instructions-invalid',f.models,model);
-  try {await p.tick();assert.equal(f.faux.state.callCount,0);}finally{await p.close();}
+  try {assert.equal(f.faux.state.callCount,0);}finally{await p.close();}
 });
 test('startup queues behind saved user work and resumes its original durable task',async()=>{
   const f=fixture([fauxAssistantMessage('working '.repeat(100))],10);
@@ -546,7 +543,7 @@ test('close waits for teardown and exposes its failure while releasing resources
   try {assert.deepEqual(await request('close-failure',{op:'close'}),{closed:true});assert.equal(readFileSync(join(dirs.tools,'closed'),'utf8'),'closed\nclosed\n');}finally{await q.close();}
 });
 test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
-  writeFrameSettings(prepare('alpha').tools,{model,memory:true,messaging:false});
+  writeFrameSettings(prepare('alpha').tools,{model,memory:true});
   const a=fixture([async context=>{assert.ok(JSON.stringify(context).includes('remember-alpha'));return fauxAssistantMessage('alpha answer');}]);
   const b=fixture([fauxAssistantMessage('beta answer')]);
   const alpha=await Frame.open('alpha',a.models,model);const beta=await Frame.open('beta',b.models,model);
@@ -558,7 +555,8 @@ test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
     assert.notEqual(paths('alpha').tools,paths('beta').tools);
     for(const name of ['alpha','beta']) {
       const p=paths(name);assert.equal(p.state,join(p.tools,'.state'));
-      for(const file of ['durable.sqlite','app.sqlite','lock.sqlite'])assert.ok(existsSync(join(p.state,file)));
+      for(const file of ['durable.sqlite','lock.sqlite'])assert.ok(existsSync(join(p.state,file)));
+      assert.equal(existsSync(join(p.state,'app.sqlite')),false);
     }
     assert.equal(existsSync(join(directory,'.philby')),false);
     await alpha.close();
@@ -567,147 +565,49 @@ test('isolated memory, tools, durable conversation and lifetime lock',async()=>{
     try {assert.equal((await revived.harness.snapshot(Memory,revived.conversation.id,ctx))?.notes,'remember-alpha');assert.ok(JSON.stringify(await revived.operation({op:'capture'})).includes('alpha answer'));}finally{await revived.close();}
   } finally {await alpha.close();await beta.close();}
 });
-test('receiving frame mailbox survives closed frames without creating tools and deduplicates retries',async()=>{
-  const e=envelope('sender','receiving-frame','hello',{id:'stable-message'});
-  enableMessaging(e.from,e.to);
-  const mailbox=new Store(e.to);mailbox.accept(e);mailbox.close();
-  for(const file of ['SCOPE.md','Makefile','.frame-type'])assert.equal(existsSync(join(paths(e.to).tools,file)),false);
-  assert.equal(paths(e.to).state,join(paths(e.to).tools,'.state'));
-  assert.equal(existsSync(paths(e.from).state),false);
-  assert.equal(existsSync(join(paths(e.to).state,'durable.sqlite')),false);
-  const receiving=await Frame.open(e.to,fixture([fauxAssistantMessage('received')]).models,model);
-  try {
-    await until(async()=>JSON.stringify(await receiving.operation({op:'capture'})).includes('received'));
-    await receiving.operation({op:'receive',envelope:e});await receiving.tick();
-    const entries=await receiving.conversation.context(ctx);assert.equal(entries.messages.filter(m=>m.role==='user').length,1);
-    assert.throws(()=>receiving.store.accept({...e,content:'conflict'}),/conflict/);
-  } finally {await receiving.close();}
-});
-test('frame send persists directly in the receiving frame mailbox with its input mode',async()=>{
-  enableMessaging('sending-frame','receiving-closed');
-  const sending=await Frame.open('sending-frame',fixture().models,model);
-  try {
-    assert.equal(sending.messaging,true);
-    assert.deepEqual(await sending.operation({op:'send',to:'receiving-closed',content:'focus here',id:'steering',mode:'steer'}),{accepted:'steering'});
-    const receiving=new Store('receiving-closed');
-    try {assert.deepEqual(receiving.pending(),[envelope('sending-frame','receiving-closed','focus here',{id:'steering',mode:'steer'})]);}
-    finally {receiving.close();}
-    assert.equal(sending.store.db.prepare("SELECT name FROM sqlite_master WHERE name='outbox'").get(),undefined);
-  }finally{await sending.close();}
-});
-test('disabled messaging rejects messages and reports through live operations and closed mailboxes',async()=>{
-  const disabled='messaging-disabled',enabled='messaging-enabled';
-  enableMessaging(enabled);
+test('frames ignore historical mailbox files and reject removed messaging operations',async()=>{
+  const name='no-mailbox',dirs=prepare(name),file=join(dirs.state,'app.sqlite');
+  mkdirSync(dirs.state,{recursive:true});
+  const historical=Buffer.from('historical mailbox bytes');
+  writeFileSync(file,historical);
   const f=fixture();
-  const off=await Frame.open(disabled,f.models,model);
-  const on=await Frame.open(enabled,fixture().models,model);
+  const p=await Frame.open(name,f.models,model);
   try {
-    assert.equal(off.messaging,false);
-    for(const kind of ['input','update'] as const) {
-      await assert.rejects(off.operation({op:'send',to:enabled,content:'outgoing blocked',kind}),/messaging.*disabled/i);
-      await assert.rejects(on.operation({op:'send',to:disabled,content:'incoming blocked',kind}),/messaging.*disabled/i);
-      await assert.rejects(request(disabled,{op:'receive',envelope:envelope(enabled,disabled,'receive blocked',{kind})}),/messaging.*disabled/i);
-      assert.throws(()=>on.store.accept(envelope(disabled,enabled,'direct outgoing blocked',{kind})),/messaging.*disabled/i);
+    for(const op of ['send','receive','updates']) {
+      await assert.rejects(request(name,{op}),/Unknown operation/);
     }
-    await assert.rejects(off.operation({op:'updates',mark:true}),/messaging.*disabled/i);
-    assert.deepEqual(off.store.pending(),[]);
-    assert.deepEqual(on.store.pending(),[]);
-    assert.equal(f.faux.state.callCount,0);
-    await off.close();
-    const mailbox=new Store(disabled);
-    try {
-      for(const kind of ['input','update'] as const)assert.throws(()=>mailbox.accept(envelope(enabled,disabled,'closed incoming blocked',{kind})),/messaging.*disabled/i);
-      assert.deepEqual(mailbox.pending(),[]);
-    } finally {mailbox.close();}
-    for(const command of ['send','report'])for(const [from,to] of [[enabled,disabled],[disabled,enabled]]) {
-      const result=await runCli(command,{id:to,from,PROMPT:'CLI blocked message'});
+    for(const command of ['send','report','updates','messaging']) {
+      const result=await runCli(command,{id:name});
       assert.notEqual(result.code,0);
-      assert.match(result.stderr,/messaging.*disabled/i);
+      assert.match(result.stderr,/Unknown operation/);
     }
-    assert.deepEqual(on.store.pending(),[]);
-  } finally {await off.close();await on.close();}
+    await p.operation({op:'input',content:'ordinary input'});
+    await p.conversation.waitForIdle(ctx);
+    await p.operation({op:'new'});
+    assert.equal(f.faux.state.callCount,1);
+    assert.deepEqual(readFileSync(file),historical);
+  } finally {await p.close();}
+  assert.deepEqual(readFileSync(file),historical);
 });
-test('disabled messaging retains reports and allows cancelling pending work with a new session',async()=>{
-  const name='messaging-retained',tools=prepare(name).tools;
-  enableMessaging('sender',name);
-  const original=await Frame.open(name,fixture().models,model);
-  const id=original.conversation.id;
-  const oldReport=envelope('sender',name,'retained passive report',{id:'retained-old-report',kind:'update'});
-  await original.operation({op:'receive',envelope:oldReport});
-  await original.tick();
-  await original.operation({op:'memory',field:'notes',content:'retained independent memory'});
-  await original.close();
-  const input=envelope('sender',name,'retained pending input',{id:'retained-input'});
-  const report=envelope('sender',name,'retained pending report',{id:'retained-new-report',kind:'update'});
-  const mailbox=new Store(name);
-  try {mailbox.accept(input);mailbox.accept(report);} finally {mailbox.close();}
-  writeFrameSettings(tools,{...readFrameSettings(tools)!,messaging:false});
-  const f=fixture([context=>{
-    const sections=Object.assign({},...context.messages.filter(m=>m.role==='system').map(m=>m.sections));
-    assert.equal(Object.hasOwn(sections,'unread-updates'),false);
-    assert.ok(!JSON.stringify(context).includes(oldReport.content));
-    assert.ok(!JSON.stringify(context).includes(report.content));
-    return fauxAssistantMessage('direct input still works');
-  }]);
-  const off=await Frame.open(name,f.models,model);
-  try {
-    assert.equal(off.conversation.id,id);
-    assert.equal(off.messaging,false);
-    await off.tick();
-    assert.deepEqual(off.store.pending(),[input,report]);
-    assert.equal(f.faux.state.callCount,0);
-    assert.equal((await off.harness.snapshot(Memory,id,ctx))?.notes,'retained independent memory');
-    await assert.rejects(off.operation({op:'updates',mark:true}),/messaging.*disabled/i);
-    await off.operation({op:'new'});
-    assert.deepEqual(off.store.updates(),[{...oldReport,seen:false}]);
-    assert.equal((await (await off.conversation.submit({type:'input',content:'direct request'},ctx)).wait(ctx)).status,'done');
-    assert.deepEqual(off.store.pending(),[report]);
-  } finally {await off.close();}
-  writeFrameSettings(tools,{...readFrameSettings(tools)!,messaging:true});
-  const resumedFixture=fixture([context=>{
-    assert.ok(JSON.stringify(context).includes(oldReport.content));
-    assert.ok(JSON.stringify(context).includes(report.content));
-    return fauxAssistantMessage('retained reports available');
-  }]);
-  const resumed=await Frame.open(name,resumedFixture.models,model);
-  try {
-    await resumed.conversation.waitForIdle(ctx);
-    assert.equal(resumed.conversation.id,id);
-    assert.deepEqual(resumed.store.pending(),[]);
-    assert.equal(resumedFixture.faux.state.callCount,0);
-    assert.deepEqual(resumed.store.updates(),[{...oldReport,seen:false},{...report,seen:false}]);
-    await resumed.operation({op:'input',content:'fresh request with reports'});
-    await resumed.conversation.waitForIdle(ctx);
-    await resumed.operation({op:'receive',envelope:input});
-    await resumed.operation({op:'receive',envelope:report});
-    await resumed.tick();
-    await resumed.conversation.waitForIdle(ctx);
-    assert.equal(resumedFixture.faux.state.callCount,1);
-    const history=(await resumed.conversation.context(ctx)).messages;
-    assert.equal(history.filter(m=>m.role==='user' && JSON.stringify(m.content).includes(input.content)).length,0);
-  } finally {await resumed.close();}
-});
-test('model and thinking selection preserve disabled messaging across reopening',async()=>{
-  const name='messaging-settings',alternate={provider:'test',modelId:'messaging-alternate'};
+test('model and thinking selection preserve opt-ins across reopening',async()=>{
+  const name='selection-settings',alternate={provider:'test',modelId:'selection-alternate'};
   const provider=fauxProvider({provider:'test',models:[{id:model.modelId,reasoning:true},{id:alternate.modelId,reasoning:true}]});
   const models=createModels();models.setProvider(provider.provider);
   const tools=prepare(name).tools;
   const optIns={memory:true,toolSources:['frame/Makefile']};
-  writeFrameSettings(tools,{model,...optIns,messaging:false});
+  writeFrameSettings(tools,{model,...optIns});
   const frame=await Frame.open(name,models,model);
   const id=frame.conversation.id;
   try {
     await frame.operation({op:'model',...alternate});
-    assert.equal(readFrameSettings(tools)?.messaging,false);
     await frame.operation({op:'thinking',level:'high'});
-    assert.deepEqual(readFrameSettings(tools),{model:alternate,thinkingLevel:'high',...optIns,messaging:false});
+    assert.deepEqual(readFrameSettings(tools),{model:alternate,thinkingLevel:'high',...optIns});
     await frame.operation({op:'thinking',level:null});
-    assert.deepEqual(readFrameSettings(tools),{model:alternate,...optIns,messaging:false});
+    assert.deepEqual(readFrameSettings(tools),{model:alternate,...optIns});
   } finally {await frame.close();}
   const reopened=await Frame.open(name,models,model);
   try {
     assert.equal(reopened.conversation.id,id);
-    assert.equal(reopened.messaging,false);
     assert.deepEqual((await reopened.conversation.agent(ctx)).model,alternate);
     assert.equal(provider.state.callCount,0);
   } finally {await reopened.close();}
@@ -717,7 +617,6 @@ test('CLI frame IDs route explicitly and reject invalid IDs before changing a fr
   const receiver=await Frame.open('id-receiver',fixture().models,model);
   try {
     assert.equal(current.id,'id-current');
-    assert.equal(receiver.store.id,receiver.id);
     const explicit=await runCli('memory',{id:receiver.id,PHILBY_FRAME:current.id,FIELD:'notes',PROMPT:'receiver memory'});
     assert.equal(explicit.code,0,explicit.stderr);
     const inferred=await runCli('memory',{PHILBY_FRAME:current.id,FIELD:'notes',PROMPT:'current memory'});
@@ -732,86 +631,6 @@ test('CLI frame IDs route explicitly and reject invalid IDs before changing a fr
     assert.equal((await current.harness.snapshot(Memory,current.conversation.id,ctx))?.notes,'current memory');
     assert.equal((await receiver.harness.snapshot(Memory,receiver.conversation.id,ctx))?.notes,'receiver memory');
   } finally {await current.close();await receiver.close();}
-});
-test('CLI messaging changes require a closed frame and retain saved settings and conversation',async()=>{
-  const name='messaging-cli',f=fixture();
-  enableMessaging(name);
-  const frame=await Frame.open(name,f.models,model);
-  const id=frame.conversation.id,tools=paths(name).tools,file=join(tools,'frame.env');
-  let history:unknown;
-  try {
-    await frame.operation({op:'thinking',level:'high'});
-    await frame.operation({op:'memory',field:'notes',content:'toggle preserves memory'});
-    assert.equal((await (await frame.conversation.submit({type:'input',content:'toggle preserves history'},ctx)).wait(ctx)).status,'done');
-    history=await frame.operation({op:'capture'});
-    const query=await runCli('messaging',{id:name,ENABLED:undefined});
-    assert.equal(query.code,0,query.stderr);
-    assert.deepEqual(JSON.parse(query.stdout),{id:name,enabled:true,running:true,active:true});
-    const before=readFileSync(file,'utf8');
-    const runningChange=await runCli('messaging',{id:name,ENABLED:'false'});
-    assert.notEqual(runningChange.code,0);
-    assert.match(runningChange.stderr,/already running|closed/i);
-    assert.equal(readFileSync(file,'utf8'),before);
-  } finally {await frame.close();}
-  const before=readFileSync(file,'utf8');
-  const invalid=await runCli('messaging',{id:name,ENABLED:'0'});
-  assert.notEqual(invalid.code,0);
-  assert.match(invalid.stderr,/ENABLED/);
-  assert.equal(readFileSync(file,'utf8'),before);
-  const changed=await runCli('messaging',{id:name,ENABLED:'false'});
-  assert.equal(changed.code,0,changed.stderr);
-  assert.equal(JSON.parse(changed.stdout).enabled,false);
-  assert.doesNotMatch(readFileSync(file,'utf8'),/FRAME_MESSAGING/);
-  assert.deepEqual(readFrameSettings(tools),{model,thinkingLevel:'high',messaging:false});
-  assert.equal(f.faux.state.callCount,1);
-  const reopened=await Frame.open(name,f.models,model);
-  try {
-    assert.equal(reopened.conversation.id,id);
-    assert.equal(reopened.messaging,false);
-    assert.deepEqual(await reopened.operation({op:'capture'}),history);
-    assert.equal((await reopened.harness.snapshot(Memory,id,ctx))?.notes,'toggle preserves memory');
-    assert.equal(f.faux.state.callCount,1);
-  } finally {await reopened.close();}
-});
-test('concurrent writers cannot accept conflicting content for one receiving frame request ID',{timeout:10000},async()=>{
-  enableMessaging('concurrent-sender','concurrent-receiving');
-  const moduleUrl=new URL('../src/store.js',import.meta.url).href;
-  const children:ReturnType<typeof spawn>[]=[];
-  let ready=0;
-  try {
-    const results=await Promise.all(['first','second'].map(content=>new Promise<boolean>((resolve,reject)=>{
-      const script=`import {Store,envelope} from ${JSON.stringify(moduleUrl)};
-        const store=new Store('concurrent-receiving');
-        process.once('message',()=>{
-          let accepted=true;
-          try {store.accept(envelope('concurrent-sender','concurrent-receiving',${JSON.stringify(content)},{id:'concurrent-request'}));}
-          catch(error){if(!String(error).includes('Request ID conflict'))throw error;accepted=false;}
-          finally{store.close();}
-          process.send({accepted},()=>process.disconnect());
-        });
-        process.send('ready');`;
-      const child=spawn(process.execPath,['--input-type=module','-e',script],{env:process.env,stdio:['ignore','ignore','pipe','ipc']});
-      children.push(child);let accepted:boolean|undefined;let error='';
-      child.stderr!.on('data',chunk=>{error+=chunk;});
-      child.on('message',message=>{
-        if(message==='ready') {if(++ready===2)for(const writer of children)writer.send('accept');}
-        else accepted=(message as {accepted:boolean}).accepted;
-      });
-      child.once('error',reject);
-      child.once('exit',code=>code===0 && accepted!==undefined?resolve(accepted):reject(Error(error || `Writer exited ${code}`)));
-    })));
-    assert.deepEqual(results.sort(),[false,true]);
-    const receiving=new Store('concurrent-receiving');
-    try {assert.equal(receiving.pending().length,1);}finally{receiving.close();}
-  }finally{for(const child of children)child.kill();}
-});
-test('updates are durable and passive',async()=>{
-  enableMessaging('update-sender','updates');
-  const f=fixture();const p=await Frame.open('updates',f.models,model);
-  const e=envelope('update-sender','updates','decision needed',{kind:'update'});
-  await p.operation({op:'receive',envelope:e});await p.tick();assert.equal(f.faux.state.callCount,0);await p.close();
-  const q=await Frame.open('updates',fixture().models,model);
-  try {const updates=await q.operation({op:'updates',mark:true}) as any[];assert.equal(updates.length,1);assert.equal(updates[0].seen,false);assert.equal(q.store.updates()[0].seen,true);}finally{await q.close();}
 });
 test('close preserves queued work',async()=>{
   const f=fixture([fauxAssistantMessage('slow answer '.repeat(100)),fauxAssistantMessage('queued answer')],10);
@@ -844,7 +663,6 @@ test('stop preserves follow-ups without automatically restarting them',async()=>
   try {
     await p.operation({op:'input',content:'first'});await until(()=>f.faux.state.callCount===1);
     await p.operation({op:'input',content:'follow-up'});await p.operation({op:'stop'});
-    await p.tick();
     assert.equal(f.faux.state.callCount,1);
     assert.ok((await p.harness.inspect(ctx)).submissions.some(s=>s.status==='queued' && s.type==='input'));
     assert.equal((await (await p.conversation.submit({type:'input',content:'continue'},ctx)).wait(ctx)).status,'done');
@@ -870,21 +688,6 @@ test('SIGKILL releases lifetime lock and unsafe tool intent recovers without rep
 });
 
 
-test('delivery recovers after receiving frame Durable admission before marking its mailbox placed',async()=>{
-  const e=envelope('boundary-sender','boundary-receiving','exactly once',{id:'boundary'});
-  enableMessaging(e.from,e.to);
-  const p=await Frame.open(e.to,fixture([fauxAssistantMessage('partial '.repeat(100))],10).models,model);
-  p.store.accept(e);
-  await p.conversation.submit({type:'input',content:`[From ${e.from}]\n${e.content}`,requestId:`message:${e.id}`,whenBusy:e.mode},ctx);
-  assert.equal(p.store.pending().length,1);
-  await p.close();
-  const q=await Frame.open(e.to,fixture([fauxAssistantMessage('recovered')]).models,model);
-  try {
-    await q.conversation.waitForIdle(ctx);
-    assert.equal((await q.conversation.context(ctx)).messages.filter(m=>m.role==='user').length,1);
-    assert.equal(q.store.pending().length,0);
-  }finally{await q.close();}
-});
 test('plan mode gates mutating tools to read-only until exited',async()=>{
   const target=join(directory,'plan-target');
   const f=fixture([
@@ -1012,6 +815,88 @@ test('exit without replacement preserves existing plan',async()=>{
     assert.deepEqual(await p.operation({op:'plan'}),{active:false,plan:'original plan'});
   }finally{await p.close();}
 });
+test('new reloads instructions, sources, settings and tool environment only at the session boundary',async()=>{
+  const requests:Awaited<ReturnType<typeof providerRequest>>[]=[];
+  const response=async(context:TranscriptContext)=>{
+    requests.push(await providerRequest(context));
+    return fauxAssistantMessage('done');
+  };
+  const f=fixture([response,response,response,response]);
+  const alternate={provider:'reload-model',modelId:'other'};
+  const other=fauxProvider({provider:alternate.provider,models:[{id:alternate.modelId}],tokensPerSecond:10000});
+  other.setResponses([response,response]);
+  f.models.setProvider(other.provider);
+  const tools=prepare('reload-session').tools;
+  const scope=join(tools,'SCOPE.md'),source=join(tools,'local.mk');
+  writeFileSync(source,'local:\n\t@true\n');
+  writeFileSync(join(tools,'.env.schema'),'# @defaultRequired=false\n\n# @sensitive=false @type=string\nRELOAD_VALUE=before\n');
+  const p=await Frame.open('reload-session',f.models,model);
+  const submit=async()=>assert.equal((await (await p.conversation.submit({type:'input',content:'inspect'},ctx)).wait(ctx)).status,'done');
+  try {
+    await p.operation({op:'memory',field:'notes',content:'retained reload memory'});
+    await submit();
+    writeFileSync(join(directory,'FRAME.md'),guidance+'\nReloaded shared instructions.');
+    writeFileSync(scope,'Reloaded frame scope.');
+    writeFileSync(join(tools,'.env'),'RELOAD_VALUE=after\n');
+    writeFrameSettings(tools,{model:alternate,memory:true,thinkingLevel:'high',toolSources:['frame/local.mk']});
+    await submit();
+    assert.equal(requests[0].system,requests[1].system);
+    const oldEnv=p.env;
+    let value='';
+    const before=await oldEnv.exec('printf "%s" "$RELOAD_VALUE"',{onOutput:text=>{value+=text;}},ctx);
+    assert.ok(before.ok);
+    assert.equal(value,'before');
+    await p.operation({op:'new'});
+    assert.notEqual(p.env,oldEnv);
+    assert.deepEqual((await p.conversation.agent(ctx)).model,alternate);
+    assert.equal((await p.conversation.agent(ctx)).thinkingLevel,'high');
+    const env=await p.env.exec('printf "%s" "$RELOAD_VALUE"',{onOutput:text=>assert.equal(text,'after')},ctx);
+    assert.ok(env.ok);
+    if(env.ok) assert.equal(env.value.exitCode,0);
+    await submit();
+    await submit();
+    assert.equal(requests[2].system,requests[3].system);
+    assert.match(requests[2].system,/Reloaded shared instructions/);
+    assert.match(requests[2].system,/Reloaded frame scope/);
+    assert.match(requests[2].system,/retained reload memory/);
+    assert.ok(requests[2].system.includes(source));
+    writeFrameSettings(tools,{model});
+    await p.operation({op:'new'});
+    await submit();
+    assert.doesNotMatch(requests[4].system,/retained reload memory|local\.mk/);
+  }finally{writeFileSync(join(directory,'FRAME.md'),guidance);await p.close();}
+});
+test('new validates configuration before clearing history or the current environment',async()=>{
+  const f=fixture();
+  const p=await Frame.open('reload-invalid',f.models,model);
+  try {
+    await (await p.conversation.submit({type:'input',content:'preserved question'},ctx)).wait(ctx);
+    const before=await p.operation({op:'capture',all:true});
+    const env=p.env;
+    const tools=paths(p.id).tools;
+    const settings=readFileSync(join(tools,'frame.env'),'utf8');
+    const scope=readFileSync(join(tools,'SCOPE.md'),'utf8');
+    const invalid=[
+      {file:'frame.env',content:'FRAME_MODEL=invalid',error:/Varlock configuration is invalid/},
+      {file:'frame.env',content:'FRAME_MODEL="missing/model"\n',error:/model unavailable/},
+      {file:'frame.env',content:settings+'FRAME_TOOL_SOURCES="frame/missing.mk"\n',error:/file is missing/},
+      {file:'.env.schema',content:'# @defaultRequired=true\n\nRELOAD_REQUIRED=\n',error:/Varlock configuration is invalid/}
+    ];
+    for(const item of invalid) {
+      const file=join(tools,item.file),original=readFileSync(file,'utf8');
+      writeFileSync(file,item.content);
+      await assert.rejects(p.operation({op:'new'}),item.error);
+      writeFileSync(file,original);
+      assert.deepEqual(await p.operation({op:'capture',all:true}),before);
+      assert.equal(p.env,env);
+    }
+    rmSync(join(tools,'SCOPE.md'));
+    await assert.rejects(p.operation({op:'new'}),/ENOENT/);
+    writeFileSync(join(tools,'SCOPE.md'),scope);
+    assert.deepEqual(await p.operation({op:'capture',all:true}),before);
+    await p.operation({op:'new'});
+  }finally{await p.close();}
+});
 test('new session starts fresh context while preserving memory and history',async()=>{
   const f=fixture([
     fauxAssistantMessage('first session answer'),
@@ -1023,7 +908,7 @@ test('new session starts fresh context while preserving memory and history',asyn
       return fauxAssistantMessage('second session answer');
     }
   ]);
-  writeFrameSettings(prepare('new-session').tools,{model,memory:true,messaging:false});
+  writeFrameSettings(prepare('new-session').tools,{model,memory:true});
   const p=await Frame.open('new-session',f.models,model);
   try {
     const conversationId=p.conversation.id;
@@ -1103,12 +988,9 @@ test('new session persists across frame reopen',async()=>{
     assert.ok(texts.includes('new question'));
   }finally{await p.close();}
 });
-test('new session cancels queued inputs and pending deliveries while preserving request identities and reports',async()=>{
+test('new session cancels queued inputs while preserving request identities across reopening',async()=>{
   const f=fixture([fauxAssistantMessage('fresh done'),fauxAssistantMessage('reopened done')]);
-  enableMessaging('sender','new-queued');
   let p=await Frame.open('new-queued',f.models,model);
-  const message=envelope('sender','new-queued','delivery before reset',{id:'stable-reset-delivery'});
-  const report=envelope('sender','new-queued','retained report',{id:'stable-reset-report',kind:'update'});
   let queuedId:number;
   try {
     await p.conversation.commit(async tx=>{
@@ -1117,22 +999,13 @@ test('new session cancels queued inputs and pending deliveries while preserving 
       queuedId=submission.id;
       inbox.items.push({id:submission.id,mode:'followUp',content:'queued before reset'});
     },ctx);
-    p.store.accept(message);
-    p.store.accept(report);
     await p.operation({op:'new'});
-    await p.tick();
     assert.equal(f.faux.state.callCount,0);
-    assert.deepEqual(p.store.pending(),[]);
-    assert.deepEqual(p.store.updates(),[{...report,seen:false}]);
     const retried=await p.conversation.submit({type:'input',content:'queued before reset',requestId:'queued-before-reset'},ctx);
     assert.equal(retried.id,queuedId!);
     const result=await retried.wait(ctx);
     assert.ok(result.status==='unanswered');
     assert.equal(result.reason,'aborted');
-    p.store.accept(message);
-    assert.throws(()=>p.store.accept({...message,content:'conflicting retry'}),/Request ID conflict/);
-    await p.tick();
-    assert.equal(f.faux.state.callCount,0);
     assert.deepEqual((await p.operation({op:'capture'}) as any[]).map(entry=>entry.kind),['pi.reset']);
     await p.operation({op:'input',content:'fresh after cancellation'});
     await p.conversation.waitForIdle(ctx);
@@ -1140,20 +1013,17 @@ test('new session cancels queued inputs and pending deliveries while preserving 
   }finally{await p.close();}
   p=await Frame.open('new-queued',f.models,model);
   try {
-    p.store.accept(message);
-    await p.tick();
     const retried=await p.conversation.submit({type:'input',content:'queued before reset',requestId:'queued-before-reset'},ctx);
     assert.equal(retried.id,queuedId!);
     assert.equal((await retried.wait(ctx)).status,'unanswered');
     assert.equal(f.faux.state.callCount,1);
-    assert.deepEqual(p.store.updates(),[{...report,seen:false}]);
     await p.operation({op:'input',content:'fresh after reopen'});
     await p.conversation.waitForIdle(ctx);
     assert.equal(f.faux.state.callCount,2);
     const current=JSON.stringify(await p.operation({op:'capture'}));
     assert.match(current,/fresh after cancellation/);
     assert.match(current,/fresh after reopen/);
-    assert.doesNotMatch(current,/queued before reset|delivery before reset/);
+    assert.doesNotMatch(current,/queued before reset/);
   }finally{await p.close();}
 });
 test('new session cancels the running opening checklist',async()=>{
@@ -1178,25 +1048,22 @@ test('new session cancels the running opening checklist',async()=>{
     assert.doesNotMatch(JSON.stringify(await p.operation({op:'capture'})),/old opening checklist/);
   }finally{await p.close();}
 });
-test('new session waits for in-flight mailbox delivery and admits later input into fresh context',{timeout:10000},async(t)=>{
-  const f=fixture([fauxAssistantMessage('first response'),fauxAssistantMessage('second response'),fauxAssistantMessage('third response')]);
-  enableMessaging('sender','new-delivery-race');
-  const p=await Frame.open('new-delivery-race',f.models,model);
+test('new session waits for in-flight input and admits later input into fresh context',{timeout:10000},async(t)=>{
+  const f=fixture([fauxAssistantMessage('first response'),fauxAssistantMessage('second response')]);
+  const p=await Frame.open('new-input-race',f.models,model);
   const submit=p.conversation.submit.bind(p.conversation);
   let entered=false;
   let release!:()=>void;
   const released=new Promise<void>(resolve=>{release=resolve;});
   try {
     t.mock.method(p.conversation,'submit',async(draft:SubmissionDraft,context:typeof ctx)=>{
-      if(draft.requestId==='message:reset-in-flight') {
+      if(draft.requestId==='reset-in-flight') {
         entered=true;
         await released;
       }
       return submit(draft,context);
     });
-    p.store.accept(envelope('sender',p.id,'in-flight before reset',{id:'reset-in-flight'}));
-    p.store.accept(envelope('sender',p.id,'pending before reset',{id:'reset-pending'}));
-    const ticking=p.tick();
+    const input=p.operation({op:'input',content:'in-flight before reset',id:'reset-in-flight'});
     await until(()=>entered);
     let finished=false;
     const reset=p.operation({op:'new'}).then(result=>{finished=true;return result;});
@@ -1204,12 +1071,11 @@ test('new session waits for in-flight mailbox delivery and admits later input in
     await Promise.resolve();
     assert.equal(finished,false);
     release();
-    await Promise.all([ticking,reset,fresh]);
+    await Promise.all([input,reset,fresh]);
     await p.conversation.waitForIdle(ctx);
-    assert.deepEqual(p.store.pending(),[]);
     const current=JSON.stringify(await p.operation({op:'capture'}));
     assert.match(current,/input after reset request/);
-    assert.doesNotMatch(current,/in-flight before reset|pending before reset/);
+    assert.doesNotMatch(current,/in-flight before reset/);
     assert.equal((await p.harness.inspect(ctx)).tasks.length,0);
   }finally{release();t.mock.restoreAll();await p.close();}
 });
@@ -1252,25 +1118,19 @@ test('plan-set preserves plan on empty exit via operation',async()=>{
 test.after(()=>rmSync(directory,{recursive:true,force:true}));
 
 
-test('a migrated frame reopens its saved conversation, memory and queued mailbox',async()=>{
+test('a migrated frame reopens its saved conversation and memory',async()=>{
   const {migrateFrames}=await import('../src/migration.js');
   const config=fixture();
-  enableMessaging('sender','migration-resume');
   const original=await Frame.open('migration-resume',config.models,model);
   const id=original.conversation.id;
   await original.operation({op:'memory',field:'notes',content:'Retain migration memory'});
   assert.equal((await (await original.conversation.submit({type:'input',content:'Retain migration history'},ctx)).wait(ctx)).status,'done');
   const history=(await original.conversation.context(ctx)).messages;
   await original.close();
-  const store=new Store('migration-resume');
-  const message=envelope('sender','migration-resume','Queued before migration',{id:'migration-queued'});
-  store.accept(message);store.close();
   const tools=paths('migration-resume').tools;
   renameSync(join(tools,'.frame-type'),join(tools,'.pane-type'));
   renameSync(join(directory,'frames'),join(directory,'panes'));
   migrateFrames(join(directory,'panes'),join(directory,'frames'));
-  const pending=new Store('migration-resume');
-  assert.deepEqual(pending.pending(),[message]);pending.close();
   const reopened=await Frame.open('migration-resume',config.models,()=>{throw Error('must retain saved model');});
   try {
     assert.equal(reopened.conversation.id,id);

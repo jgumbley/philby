@@ -209,6 +209,31 @@ fn pending_for(root: &Path, batch: &Batch) -> Result<Option<Pending>> {
     Ok(pending)
 }
 
+pub fn append_journal(root: &Path, entry: &str) -> Result<String> {
+    if entry.trim().is_empty() {
+        return Err("A nonempty journal entry is required".into());
+    }
+    let (relative, path, content) = journal_content(root, entry)?;
+    write_journal(root, &path, &content)?;
+    Ok(format!("{relative}\n"))
+}
+
+fn journal_content(root: &Path, entry: &str) -> Result<(String, PathBuf, String)> {
+    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let relative = format!("journals/{date}.md");
+    let path = storage::path(root, &relative)?;
+    let previous = storage::optional(&path)?.unwrap_or_else(|| format!("# {date}\n"));
+    let content = format!("{previous}\n\n{entry}\n");
+    Ok((relative, path, content))
+}
+
+fn write_journal(root: &Path, path: &Path, content: &str) -> Result<()> {
+    create_directory(root, "pages")?;
+    create_directory(root, "journals")?;
+    storage::replace(path, content)?;
+    storage::sync_directory(root)
+}
+
 pub fn publish(root: &Path, name: &str) -> Result<String> {
     publish_with(root, name, storage::replace)
 }

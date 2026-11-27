@@ -2,8 +2,8 @@ GRAPHWIKI_AUTHORING := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 GRAPHWIKI_SHARED := $(abspath $(GRAPHWIKI_AUTHORING)/../..)
 override GRAPH_ROOT := $(CURDIR)/wiki
 export GRAPH_ROOT
-.PHONY: context publish index lint editorial-check
-context index:
+.PHONY: context publish index lint editorial-check journal
+context index journal:
 	@$(MAKE) --no-print-directory -f "$(GRAPHWIKI_SHARED)/Makefile" wiki-$@ GRAPH_ROOT="$$GRAPH_ROOT"
 publish:
 	@$(MAKE) --no-print-directory editorial-check

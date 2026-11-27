@@ -1,7 +1,7 @@
 mod document;
 mod screen;
 
-use std::{fs::OpenOptions, path::Path};
+use std::{fs::OpenOptions, path::Path, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind},
@@ -65,12 +65,20 @@ fn lock() -> Result<std::fs::File> {
     Ok(file)
 }
 
-fn next_event() -> std::io::Result<Event> {
+fn next_event() -> std::io::Result<Option<Event>> {
     loop {
-        let input = event::read()?;
-        if handles(&input) {
+        let input = next_input()?;
+        if input.as_ref().is_none_or(handles) {
             return Ok(input);
         }
+    }
+}
+
+fn next_input() -> std::io::Result<Option<Event>> {
+    if event::poll(Duration::from_secs(1))? {
+        event::read().map(Some)
+    } else {
+        Ok(None)
     }
 }
 
@@ -92,8 +100,18 @@ impl Viewer {
     fn run(&mut self, root: &Path) -> std::io::Result<()> {
         loop {
             let document = self.draw()?;
-            if !self.event(next_event()?, &document, root) {
+            if !self.input(next_event()?, &document, root) {
                 return Ok(());
+            }
+        }
+    }
+
+    fn input(&mut self, event: Option<Event>, document: &Document, root: &Path) -> bool {
+        match event {
+            Some(event) => self.event(event, document, root),
+            None => {
+                self.refresh(root);
+                true
             }
         }
     }
@@ -194,13 +212,24 @@ impl Viewer {
 
     fn refresh(&mut self, root: &Path) {
         match load(root) {
-            Ok(graph) => {
-                self.graph = graph;
-                self.selected = None;
-                self.message = HELP.into();
-            }
+            Ok(graph) => self.update_graph(graph),
             Err(error) => self.message = error,
         }
+    }
+
+    fn update_graph(&mut self, graph: Graph) {
+        let unchanged = self
+            .graph
+            .pages
+            .iter()
+            .map(|(key, page)| (key, &page.content))
+            .eq(graph.pages.iter().map(|(key, page)| (key, &page.content)));
+        if unchanged {
+            return;
+        }
+        self.graph = graph;
+        self.selected = None;
+        self.message = HELP.into();
     }
 
     fn select_next(&mut self, document: &Document) {
@@ -258,5 +287,47 @@ impl Viewer {
             21..=28 => self.back(),
             _ => (),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Graph, Location, Viewer};
+    use crate::page::Page;
+
+    fn graph(content: &str) -> Graph {
+        let page = Page::parse("journals", "2026-11-27".into(), content.into()).unwrap();
+        let mut graph = Graph::default();
+        graph.pages.insert(page.key(), page);
+        graph
+    }
+
+    #[test]
+    fn unchanged_refresh_preserves_selection_and_changed_journal_updates_in_place() {
+        let mut viewer = Viewer {
+            graph: graph("Original evidence"),
+            location: Location {
+                page: Some("journals/2026-11-27".into()),
+                journals: true,
+                offset: 3,
+            },
+            history: Vec::new(),
+            selected: Some(0),
+            message: "selected source".into(),
+        };
+        viewer.update_graph(graph("Original evidence"));
+        assert_eq!(viewer.selected, Some(0));
+        assert_eq!(viewer.message, "selected source");
+        viewer.update_graph(graph("Original evidence\nNew search result"));
+        assert_eq!(viewer.selected, None);
+        assert_eq!(viewer.location.offset, 3);
+        assert!(viewer
+            .graph
+            .pages
+            .values()
+            .next()
+            .unwrap()
+            .content
+            .contains("New search result"));
     }
 }

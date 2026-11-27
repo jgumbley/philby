@@ -29,12 +29,11 @@ override export RANGE := $(value RANGE)
 override export MAX_BYTES := $(value MAX_BYTES)
 override export MAX_SLIDES := $(value MAX_SLIDES)
 BROWSER_TOOLS := browser-connect browser-disconnect browser-status browser-tabs browser-run
-WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse wiki-pane-view
+WIKI_TOOLS := wiki-context wiki-publish wiki-index wiki-lint wiki-browse wiki-pane-view wiki-journal
 GOOGLE_WORKSPACE_TOOLS := google-workspace-credentials google-workspace-login google-workspace-diagnose google-workspace-read google-workspace-spaces google-workspace-messages google-workspace-export google-workspace-download google-workspace-check google-workspace-test
 .PHONY: help $(BROWSER_TOOLS) browser-check browser-test $(WIKI_TOOLS) wiki-check wiki-test full-pi provider-models
 help:
 	@echo 'config-check; frame-config-check id=<id>; frame-config-migrate id=<id> — validate or migrate configuration through the root Makefile'
-	@echo 'frame-messaging id=<id> [ENABLED=true|false] — inspect messaging or change it for a closed frame'
 	@echo 'provider-models [PROVIDER=name] — list available chat models from Pi'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
 	@echo 'ask reason twitter — fresh independent consultations, no local tools or frame context'
@@ -65,6 +64,7 @@ help:
 	@echo 'Wiki: GRAPH_ROOT=existing graph directory; wiki-context uses PROMPT_FILE, prompt, or stdin'
 	@echo 'wiki-publish CHANGE=stable-change-id; wiki-index; wiki-lint; commands serialize per graph'
 	@echo 'wiki-browse GRAPH_ROOT=path — local read-only terminal browser'
+	@echo 'wiki-journal GRAPH_ROOT=path — immediately append PROMPT_FILE, prompt or stdin to the published daily journal'
 	@echo 'wiki-check / wiki-test — check / validate the owned Rust source in shared/graphwiki'
 include $(ROOT)/shared/consult.mk $(ROOT)/shared/panes.mk $(ROOT)/shared/search.mk
 .PHONY: wiki-pane
@@ -95,6 +95,6 @@ wiki-test:
 full-pi provider-models:
 	@$(MAKE) --no-print-directory -s -C "$(ROOT)" build
 	@node --disable-warning=ExperimentalWarning "$(ROOT)/shared/$@.mjs"
-.PHONY: config-check frame-config-check frame-config-migrate frame-messaging
-config-check frame-config-check frame-config-migrate frame-messaging:
+.PHONY: config-check frame-config-check frame-config-migrate
+config-check frame-config-check frame-config-migrate:
 	@$(MAKE) --no-print-directory -C "$(ROOT)" $@

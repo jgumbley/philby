@@ -8,7 +8,7 @@ import { modelReference, type ModelReference } from './providers.js';
 import { loadEnvironment } from './varlock.js';
 
 export type ThinkingLevel = ModelThinkingLevel;
-export type FrameSettings = {model:ModelReference;thinkingLevel?:ThinkingLevel;messaging:boolean;memory?:boolean;toolSources?:string[]};
+export type FrameSettings = {model:ModelReference;thinkingLevel?:ThinkingLevel;memory?:boolean;toolSources?:string[]};
 export class FrameSettingsWriteError extends Error {
   readonly published=true;
   constructor(cause:unknown) {
@@ -38,13 +38,11 @@ function parseSettings(source:string):FrameSettings {
     seen.add(key);
   }
   const assignments=parseEnv(source);
-  for(const key of ['FRAME_MESSAGING','FRAME_MEMORY']) {
-    if(assignments[key]==='') throw Error(`Invalid empty frame.env setting: ${key}`);
-  }
+  if(assignments.FRAME_MEMORY==='') throw Error('Invalid empty frame.env setting: FRAME_MEMORY');
   const values=loadEnvironment([join(root,'shared','frame.env.schema')],assignments);
   const model=modelReference(values.FRAME_MODEL);
   const thinkingLevel=values.FRAME_THINKING_LEVEL as ThinkingLevel | undefined;
-  const settings:FrameSettings={model,messaging:values.FRAME_MESSAGING==='true'};
+  const settings:FrameSettings={model};
   if(thinkingLevel) settings.thinkingLevel=thinkingLevel;
   if(values.FRAME_MEMORY==='true') settings.memory=true;
   const sources=values.FRAME_TOOL_SOURCES?.trim();
@@ -63,12 +61,11 @@ export function writeFrameSettings(directory:string,settings:FrameSettings):void
   const reference=`${settings.model.provider}/${settings.model.modelId}`;
   const lines=[`FRAME_MODEL="${reference}"`];
   if(settings.thinkingLevel) lines.push(`FRAME_THINKING_LEVEL=${settings.thinkingLevel}`);
-  if(settings.messaging) lines.push('FRAME_MESSAGING=true');
   if(settings.memory) lines.push('FRAME_MEMORY=true');
   if(settings.toolSources?.length) lines.push(`FRAME_TOOL_SOURCES="${settings.toolSources.join(' ')}"`);
   const source=lines.join('\n')+'\n';
   const validated=parseSettings(source);
-  if(validated.model.provider!==settings.model.provider || validated.model.modelId!==settings.model.modelId || validated.thinkingLevel!==settings.thinkingLevel || validated.messaging!==settings.messaging
+  if(validated.model.provider!==settings.model.provider || validated.model.modelId!==settings.model.modelId || validated.thinkingLevel!==settings.thinkingLevel
     || (validated.memory ?? false)!==(settings.memory ?? false) || JSON.stringify(validated.toolSources ?? [])!==JSON.stringify(settings.toolSources ?? [])) throw Error('Frame settings cannot be represented in frame.env');
   const temporary=join(directory,`.frame.env-${randomUUID()}.tmp`);
   let published=false;

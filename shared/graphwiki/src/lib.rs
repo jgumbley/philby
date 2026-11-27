@@ -13,9 +13,16 @@ pub fn execute(operation: &str, root: &Path, argument: &str) -> Result<String> {
     if operation == "publish" {
         return publish::publish(&root, argument);
     }
-    publish::require_complete(&root)?;
-    let graph = graph::Graph::load(&root)?;
-    execute_read(operation, &root, &graph, argument)
+    execute_complete(operation, &root, argument)
+}
+
+fn execute_complete(operation: &str, root: &Path, argument: &str) -> Result<String> {
+    publish::require_complete(root)?;
+    if operation == "journal" {
+        return publish::append_journal(root, argument);
+    }
+    let graph = graph::Graph::load(root)?;
+    execute_read(operation, root, &graph, argument)
 }
 
 fn execute_read(

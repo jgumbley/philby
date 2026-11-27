@@ -5,6 +5,7 @@ const USAGE: &str = "Usage: graphwiki <operation> <graph-root> <argument>
 Operations:
   context <graph-root> <query>   Search pages and linked source pages
   publish <graph-root> <change> Publish .drafts/<change>/pages
+  journal <graph-root> <entry>  Append immediately to the UTC daily journal
   index   <graph-root> ''       Regenerate pages/index.md
   lint    <graph-root> ''       Check pages and report unresolved links
   browse  <graph-root> ''       Read articles and journals in the terminal

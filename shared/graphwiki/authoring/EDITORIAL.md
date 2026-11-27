@@ -5,7 +5,10 @@ attribution, quotations, comparisons between sources and research chronology.
 Journal entries identify the articles they inform; articles do not link back
 to journals or carry provenance metadata. Keep uncertainty and limitations in
 the article without narrating who said what. Read [the authoring guidance](AUTHORING.md) for the editorial
-review required before publishing.
+self-check performed by the writing agent before publishing. There is no
+separate reviewer, approval queue or reason to leave a successful change staged.
+Raw search evidence is appended directly to the published journal; it does not
+pass through article review or batch staging.
 
 ## Commands
 

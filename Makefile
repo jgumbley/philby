@@ -9,12 +9,9 @@ export PROMPT
 override PLAN := $(value PLAN)
 export PLAN
 export INPUT
-export PROMPT_FILE id from REQUEST_ID MODE FIELD MARK ACTIVE PLAN ALL PHILBY_DETACHED TYPE
+export PROMPT_FILE id MODE FIELD ACTIVE PLAN ALL PHILBY_DETACHED TYPE
 export LEVEL
-ifneq ($(origin ENABLED),undefined)
-export ENABLED
-endif
-.PHONY: run frame-migrate frame frame-new frame-close frame-stop frame-send frame-report frame-capture frame-list frame-memory frame-plan frame-plan-set frame-new-session frame-updates frame-tools window deps deps-update build check test check-all test-all help digest ingest quit cleanup ask reason twitter full-pi
+.PHONY: run frame-migrate frame frame-new frame-close frame-stop frame-capture frame-list frame-memory frame-plan frame-plan-set frame-new-session frame-tools window deps deps-update build check test check-all test-all help digest ingest quit cleanup ask reason twitter full-pi
 define success
 	@exec >&2; \
 	printf '\033[32m\n'; \
@@ -47,13 +44,13 @@ frame-config-check: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js frame-config-check
 frame-config-migrate: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js config-migrate
-.PHONY: config-check frame-config-check frame-config-migrate frame-thinking frame-messaging
+.PHONY: config-check frame-config-check frame-config-migrate frame-thinking
 run: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js open
 frame-migrate: build
 	@env -u PHILBY_PANES_DIR node --disable-warning=ExperimentalWarning dist/src/cli.js migrate
 frame: run
-frame-new frame-close frame-stop frame-send frame-report frame-capture frame-list frame-memory frame-plan frame-plan-set frame-new-session frame-updates frame-tools frame-thinking frame-messaging: build
+frame-new frame-close frame-stop frame-capture frame-list frame-memory frame-plan frame-plan-set frame-new-session frame-tools frame-thinking: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $(@:frame-%=%)
 window quit cleanup: build
 	@node --disable-warning=ExperimentalWarning dist/src/cli.js $@
@@ -86,20 +83,18 @@ help:
 	@echo 'config-check; frame-config-check id=<id> — validate Varlock schemas without printing values'
 	@echo 'frame-config-migrate id=<id> — write settings from an existing closed frame’s saved conversation'
 	@echo 'frame-thinking id=<id> LEVEL=off|minimal|low|medium|high|xhigh|max|default — save a frame thinking preference'
-	@echo 'frame-messaging id=<id> [ENABLED=true|false] — inspect messaging; change it while the frame is closed'
 	@echo 'deps-update — refresh the npm lockfile for package.json, then install the locked dependencies'
 	@echo 'full-pi — open the complete native Pi interface using this checkout’s .pi/agent configuration'
 	@echo 'make — create/open frame chooser; make frame id=<id> — create or resume'
 	@echo 'Navigation: Ctrl-End / Ctrl-Home; macOS Kitty: Cmd-Option-Right / Cmd-Option-Left (requires allow_remote_control yes)'
 	@echo 'frame-migrate [INPUT=old-directory] — rename panes/ to frames/ in place; PHILBY_FRAMES_DIR selects destination'
 	@echo 'frame-new — select a saved frame or New frame; frame-list — saved agents and every live tmux view'
-	@echo 'frame-close frame-stop frame-send frame-capture frame-list frame-memory'
-	@echo 'frame-plan frame-plan-set frame-new-session frame-updates frame-tools frame-report'
-	@echo 'Messages and reports: id=receiving-frame, from=sending-frame (or current frame), REQUEST_ID=, MODE=steer'
-	@echo 'Inputs: FIELD=, MARK=1, ACTIVE=1, PLAN=...; TYPE selects a creation recipe'
+	@echo 'frame-close frame-stop frame-capture frame-list frame-memory'
+	@echo 'frame-plan frame-plan-set frame-new-session frame-tools'
+	@echo 'Inputs: FIELD=, ACTIVE=1, PLAN=...; TYPE selects a creation recipe'
 	@echo 'Prompts: PROMPT_FILE=path, prompt=..., or stdin.'
 	@echo 'Plan mode: frame-plan shows status; frame-plan-set ACTIVE=1 enables read-only mode; ACTIVE=0 with PLAN= or prompt exits and saves plan'
-	@echo 'New session: frame-new-session cancels all work and starts a fresh context, preserving files, tools, memory and archived history'
+	@echo 'New session: frame-new-session validates and reloads instructions, settings and tool environment, cancels work and starts fresh; preserves files, panes, memory and archived history'
 	@echo 'frame-capture ALL=1 — include archived entries from before /new in chronological order'
 	@echo 'window deps build check test digest ingest cleanup; shared: ask reason twitter'
 	@echo 'check/test — core; check-all/test-all — include module checks and tests'

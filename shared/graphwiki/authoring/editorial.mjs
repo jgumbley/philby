@@ -54,7 +54,7 @@ function main() {
   const articles = [...pages].filter(([name]) => !['index.md', 'log.md'].includes(name));
   const failures = articles.flatMap(([, file]) => inspect(file));
   if (failures.length) throw Error(`Editorial checks failed:\n${failures.join('\n')}`);
-  console.log(`Editorial checks passed (${articles.length} articles). Manually review source narration and uncertainty before publishing.`);
+  console.log(`Editorial checks passed (${articles.length} articles).`);
 }
 
 try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
